@@ -355,18 +355,18 @@ def _draw_oneway_reinforcement_detail(
             pts_duz = _draw_straight_hit_polyline(x_duz, iy0, x_duz, iy1, bw_mm, bw_mm)
             w.add_polyline(pts_duz, layer="REB_MAIN_DUZ")
             
-            # Label: Line'dan 30mm solda, Başlangıçtan (iy0) Ln/6 aşağıda.
+            # Label: Line'dan 100mm solda, Başlangıçtan (iy0) Ln/6 aşağıda.
             lbl_y = iy0 + (Ln_long / 6.0)
-            w.add_text(x_duz - 30, lbl_y, f"düz  {ch_duz.label()}", height=100, layer="TEXT", rotation=90)
+            w.add_text(x_duz - 100, lbl_y, f"duz  {ch_duz.label()}", height=100, layer="TEXT", rotation=90)
 
         # Pilye (mirror=False: ters çevrildi)
         if ch_pilye:
             pts = _pilye_polyline(x_pilye, iy0, x_pilye, iy1, d=200.0, kink="both", hook_len=bw_mm, beam_ext=bw_mm, mirror=False)
             w.add_polyline(pts, layer="REB_MAIN_PILYE")
             
-            # Label: Line'dan 30mm sağda
+            # Label: Line'dan 100mm sağda
             lbl_y = iy0 + (Ln_long / 6.0)
-            w.add_text(x_pilye + 30, lbl_y, f"pilye {ch_pilye.label()}", height=100, layer="TEXT", rotation=90)
+            w.add_text(x_pilye + 100, lbl_y, f"pilye {ch_pilye.label()}", height=100, layer="TEXT", rotation=90)
         
         # --- 2. DAĞITMA DONATISI - Yatay ---
         if ch_dist:
@@ -391,7 +391,7 @@ def _draw_oneway_reinforcement_detail(
                 
             w.add_polyline(pts, layer="REB_DIST")
             # Label: Line üstü (+30), Başlangıçtan (x0) Lx/6 sağda
-            w.add_text(x0 + (Lx / 6.0), y_dist + 30, f"dağıtma {ch_dist.label()}", height=100, layer="TEXT")
+            w.add_text(x0 + (Lx / 6.0), y_dist + 30, f"dagitma {ch_dist.label()}", height=100, layer="TEXT", center=True)
 
         # --- 3. KENAR MESNET (Yatay) ---
         # Mesnet: merkezden -1.5*bw (dağıtma donatısıyla arası 3*bw)
@@ -412,7 +412,7 @@ def _draw_oneway_reinforcement_detail(
                 (ix0 + ext + L8, y_k + d_crank),                         # Düz uzatma
             ]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x0 + ext/2, y_k + 30, ch_kenar_start.label(), height=80, layer="TEXT")
+            w.add_text(x0 + ext/2, y_k + 30, ch_kenar_start.label(), height=80, layer="TEXT", center=True)
             
         if ch_kenar_end and not kisa_end_cont:
             hook_ext = bw_mm - 30.0
@@ -429,7 +429,7 @@ def _draw_oneway_reinforcement_detail(
                 (ix1 - ext - L8, y_k + d_crank),                         # Düz uzatma
             ]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x1 - ext/2, y_k + 30, ch_kenar_end.label(), height=80, layer="TEXT")
+            w.add_text(x1 - ext/2, y_k + 30, ch_kenar_end.label(), height=80, layer="TEXT", center=True)
 
         # --- 4. İÇ MESNET (Yatay) ---
         if ch_ic_start and kisa_start_cont:
@@ -445,7 +445,7 @@ def _draw_oneway_reinforcement_detail(
                 (x0 + L4 + d_crank + L8, y + d_crank)
             ]
             w.add_polyline(pts, layer="REB_IC_MESNET")
-            w.add_text(x0 + L4/2, y + 30, f"{ch_ic_start.label()}", height=80, layer="TEXT")
+            w.add_text(x0 + L4/2, y + 30, f"{ch_ic_start.label()}", height=80, layer="TEXT", center=True)
 
         if ch_ic_end and kisa_end_cont:
             L4 = Lx / 4.0
@@ -460,16 +460,26 @@ def _draw_oneway_reinforcement_detail(
                 (x1 - L4 - d_crank - L8, y + d_crank)
             ]
             w.add_polyline(pts, layer="REB_IC_MESNET")
-            w.add_text(x1 - L4/2, y + 30, f"{ch_ic_end.label()}", height=80, layer="TEXT")
+            w.add_text(x1 - L4/2, y + 30, f"{ch_ic_end.label()}", height=80, layer="TEXT", center=True)
 
         # --- 5. MESNET EK (Dikey) ---
-        if ch_ek_start and uzun_start_cont: # Top
-            offset_val = 600.0
-            _draw_support_extra_y(w, midx + offset_val, y0, bw_mm, ch_ek_start, Ln_long, is_top=True)
+        if ch_ek_start or ch_ek_end:
+            # Ek donatısı paralel olan ana donatılardan (düz/pilye) 2*bw uzakta olsun
+            # Ana donatıların merkezden (midx) maksimum uzaklığını bul
+            max_x_main = 0.0
+            if ch_duz:
+                max_x_main = max(max_x_main, abs(x_duz - midx))
+            if ch_pilye:
+                max_x_main = max(max_x_main, abs(x_pilye - midx))
             
-        if ch_ek_end and uzun_end_cont: # Bottom
-            offset_val = 600.0
-            _draw_support_extra_y(w, midx + offset_val, y1, bw_mm, ch_ek_end, Ln_long, is_top=False)
+            # offset_val: midx'ten itibaren mesafe. Gap = 2*bw
+            offset_val = max_x_main + 2.0 * bw_mm
+
+            if ch_ek_start and uzun_start_cont: # Top
+                _draw_support_extra_y(w, midx + offset_val, y0, bw_mm, ch_ek_start, Ln_long, is_top=True)
+                
+            if ch_ek_end and uzun_end_cont: # Bottom
+                _draw_support_extra_y(w, midx + offset_val, y1, bw_mm, ch_ek_end, Ln_long, is_top=False)
             
     else:  # auto_dir == "Y"
         Ln_long = Lx
@@ -483,12 +493,12 @@ def _draw_oneway_reinforcement_detail(
         if ch_duz:
             pts_duz = _draw_straight_hit_polyline(ix0, y_duz, ix1, y_duz, bw_mm, bw_mm)
             w.add_polyline(pts_duz, layer="REB_MAIN_DUZ")
-            w.add_text(x0 + (Ln_long / 6.0), y_duz + 30, f"düz {ch_duz.label()}", height=100, layer="TEXT")
+            w.add_text(x0 + (Ln_long / 6.0), y_duz + 30, f"duz {ch_duz.label()}", height=100, layer="TEXT", center=True)
             
         if ch_pilye:
             pts = _pilye_polyline(ix0, y_pilye, ix1, y_pilye, d=200.0, kink="both", hook_len=bw_mm, beam_ext=bw_mm, mirror=True)
             w.add_polyline(pts, layer="REB_MAIN_PILYE")
-            w.add_text(x0 + (Ln_long / 6.0), y_pilye + 30, f"pilye {ch_pilye.label()}", height=100, layer="TEXT")
+            w.add_text(x0 + (Ln_long / 6.0), y_pilye + 30, f"pilye {ch_pilye.label()}", height=100, layer="TEXT", center=True)
 
         # --- 2. DAĞITMA (Dikey) ---
         if ch_dist:
@@ -512,7 +522,7 @@ def _draw_oneway_reinforcement_detail(
             
             w.add_polyline(pts, layer="REB_DIST")
             lbl_y = y0 + (Ly / 6.0)
-            w.add_text(x_dist + 30, lbl_y, f"dağıtma {ch_dist.label()}", height=100, layer="TEXT", rotation=90)
+            w.add_text(x_dist + 100, lbl_y, f"dagitma {ch_dist.label()}", height=100, layer="TEXT", rotation=90)
 
         # --- 3. KENAR MESNET (Dikey) ---
         # Mesnet: merkezden -1.5*bw (dağıtma donatısıyla arası 3*bw)
@@ -533,7 +543,7 @@ def _draw_oneway_reinforcement_detail(
                 (x_k + d_crank, iy0 + ext + L8),                         # Düz uzatma
             ]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x_k - 30, y0 + ext/2, ch_kenar_start.label(), height=80, layer="TEXT", rotation=90)
+            w.add_text(x_k - 100, y0 + ext/2, ch_kenar_start.label(), height=80, layer="TEXT", rotation=90)
             
         if ch_kenar_end and not kisa_end_cont: # Bottom
             hook_ext = bw_mm - 30.0
@@ -550,7 +560,7 @@ def _draw_oneway_reinforcement_detail(
                 (x_k + d_crank, iy1 - ext - L8),                         # Düz uzatma
             ]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x_k - 30, y1 - ext/2, ch_kenar_end.label(), height=80, layer="TEXT", rotation=90)
+            w.add_text(x_k - 100, y1 - ext/2, ch_kenar_end.label(), height=80, layer="TEXT", rotation=90)
 
         # --- 4. İÇ MESNET (Dikey) ---
         if ch_ic_start and kisa_start_cont: # Top
@@ -566,7 +576,7 @@ def _draw_oneway_reinforcement_detail(
                 (x + d_crank, y0 + L4 + d_crank + L8)
             ]
             w.add_polyline(pts, layer="REB_IC_MESNET")
-            w.add_text(x - 30, y0 + L4/2, f"{ch_ic_start.label()}", height=80, layer="TEXT", rotation=90)
+            w.add_text(x - 100, y0 + L4/2, f"{ch_ic_start.label()}", height=80, layer="TEXT", rotation=90)
             
         if ch_ic_end and kisa_end_cont: # Bottom
             L4 = Ly / 4.0
@@ -581,16 +591,24 @@ def _draw_oneway_reinforcement_detail(
                 (x + d_crank, y1 - L4 - d_crank - L8)
             ]
             w.add_polyline(pts, layer="REB_IC_MESNET")
-            w.add_text(x - 30, y1 - L4/2, f"{ch_ic_end.label()}", height=80, layer="TEXT", rotation=90)
+            w.add_text(x - 100, y1 - L4/2, f"{ch_ic_end.label()}", height=80, layer="TEXT", rotation=90)
 
         # --- 5. EK MESNET (Yatay) ---
-        if ch_ek_start and uzun_start_cont: # Left
-            offset_val = 600.0
-            _draw_support_extra_x(w, x0, midy + offset_val, bw_mm, ch_ek_start, Ln_long, is_left=True)
+        if ch_ek_start or ch_ek_end:
+            # Ana donatıların merkezden (midy) maksimum uzaklığını bul
+            max_y_main = 0.0
+            if ch_duz:
+                max_y_main = max(max_y_main, abs(y_duz - midy))
+            if ch_pilye:
+                max_y_main = max(max_y_main, abs(y_pilye - midy))
             
-        if ch_ek_end and uzun_end_cont: # Right
-            offset_val = 600.0
-            _draw_support_extra_x(w, x1, midy + offset_val, bw_mm, ch_ek_end, Ln_long, is_left=False)
+            offset_val = max_y_main + 2.0 * bw_mm
+
+            if ch_ek_start and uzun_start_cont: # Left
+                _draw_support_extra_x(w, x0, midy + offset_val, bw_mm, ch_ek_start, Ln_long, is_left=True)
+                
+            if ch_ek_end and uzun_end_cont: # Right
+                _draw_support_extra_x(w, x1, midy + offset_val, bw_mm, ch_ek_end, Ln_long, is_left=False)
 
 
 def export_to_dxf(system: SlabSystem, filename: str, design_cache: dict, bw_val: float,
@@ -875,7 +893,7 @@ def _draw_twoway_reinforcement_detail(
 
         w.add_polyline(pts, layer="REB_MAIN_DUZ")
         # Label: Line Altı (-30), Başlangıçtan (x0) Lx/6 sağda
-        w.add_text(x0 + (Lx / 6.0), y_duz_x - 30, f"X düz {ch_x_duz.label()}", height=100, layer="TEXT", center=True)
+        w.add_text(x0 + (Lx / 6.0), y_duz_x - 30, f"X duz {ch_x_duz.label()}", height=100, layer="TEXT", center=True)
 
     # X Yönü Pilye Donatı
     if ch_x_pilye:
@@ -905,7 +923,16 @@ def _draw_twoway_reinforcement_detail(
                     pass
             
             cx = x1 + (bw_mm / 2.0)
-            cy = midy + 800 # Y konumu
+            
+            # Y konumu: Paralel ana donatılardan 2*bw uzakta
+            max_y_main = 0.0
+            if ch_x_duz:
+                max_y_main = max(max_y_main, abs(y_duz_x - midy))
+            if ch_x_pilye:
+                max_y_main = max(max_y_main, abs(y_pilye_x - midy))
+            
+            cy = midy + max_y_main + 2.0 * bw_mm
+            
             _draw_hat_bar(w, cx, cy, bw_mm, ch_x_ek, 
                           L_ext_left=L_ext_self, L_ext_right=L_ext_neigh, 
                           axis="X")
@@ -948,17 +975,17 @@ def _draw_twoway_reinforcement_detail(
             pts.append((x_duz_y - hook_len, y1 + beam_ext_duz))
 
         w.add_polyline(pts, layer="REB_MAIN_DUZ")
-        # Label: Line Solu (-30), Başlangıçtan (y0) Ly/6 aşağıda
+        # Label: Line Solu (-100), Başlangıçtan (y0) Ly/6 aşağıda
         lbl_y = y0 + (Ly / 6.0)
-        w.add_text(x_duz_y - 30, lbl_y, f"Y düz {ch_y_duz.label()}", height=100, layer="TEXT", rotation=90, center=True)
+        w.add_text(x_duz_y - 100, lbl_y, f"Y duz {ch_y_duz.label()}", height=100, layer="TEXT", rotation=90, center=True)
 
     # Y Yönü Pilye Donatı
     if ch_y_pilye:
         pts = _pilye_polyline(x_pilye_y, y0, x_pilye_y, y1, d=200.0, kink="both", hook_len=hook_len, beam_ext=beam_ext_pilye)
         w.add_polyline(pts, layer="REB_MAIN_PILYE")
-        # Label: Line Sağı (+60? -> 30?), Ly/6
+        # Label: Line Sağı (+100), Ly/6
         lbl_y = y0 + (Ly / 6.0)
-        w.add_text(x_pilye_y + 30, lbl_y, f"Y pilye {ch_y_pilye.label()}", height=100, layer="TEXT", rotation=90, center=True)
+        w.add_text(x_pilye_y + 100, lbl_y, f"Y pilye {ch_y_pilye.label()}", height=100, layer="TEXT", rotation=90, center=True)
 
     # Y Yönü Mesnet Ek
     if ch_y_ek:
@@ -981,7 +1008,14 @@ def _draw_twoway_reinforcement_detail(
             
             # Hat Çiz
             # Merkez: y1 + bw/2 (Alt kirişin ortası)
-            cx = midx - 800
+            # X konumu: Paralel ana donatılardan 2*bw uzakta (Sola doğru)
+            max_x_main = 0.0
+            if ch_y_duz:
+                max_x_main = max(max_x_main, abs(x_duz_y - midx))
+            if ch_y_pilye:
+                max_x_main = max(max_x_main, abs(x_pilye_y - midx))
+            
+            cx = midx - (max_x_main + 2.0 * bw_mm)
             cy = y1 + (bw_mm / 2.0)
             
             _draw_hat_bar(w, cx, cy, bw_mm, ch_y_ek, 
@@ -1030,9 +1064,10 @@ def _draw_support_extra_x(w, x_ref, y_ref, bw_mm, choice, Ln_long, is_left=True)
         ]
     
     w.add_polyline(pts, layer="REB_EK_MESNET")
-    # Label
+    # Label - 30mm above the flat part (y_ref or y_ref+d_crank depending on segment)
+    # The label is usually for the part inside the slab.
     lbl_x = x_ref + (L4/2.0) if is_left else x_ref - (L4/2.0)
-    w.add_text(lbl_x, y_ref + 20, f"Ek {choice.label()}", height=80, layer="TEXT", center=True)
+    w.add_text(lbl_x, y_ref + 30, f"Ek {choice.label()}", height=80, layer="TEXT", center=True)
 
 
 def _draw_support_extra_y(w, x_ref, y_ref, bw_mm, choice, Ln_long, is_top=True):
@@ -1059,8 +1094,8 @@ def _draw_support_extra_y(w, x_ref, y_ref, bw_mm, choice, Ln_long, is_top=True):
         pts = [
             (x_ref, y_beam_center),                              # Kiriş merkezi
             (x_ref, y_ref + L4),                                 # Ln/4 düz (kiriş yüzünden)
-            (x_ref - d_crank, y_ref + L4 + dy_crank),           # 134° pilye kırılma
-            (x_ref - d_crank, y_ref + L4 + dy_crank + L8),      # Ln/8 düz uzatma (düz uç)
+            (x_ref + d_crank, y_ref + L4 + dy_crank),           # 134° pilye kırılma (Ters çevrildi: +)
+            (x_ref + d_crank, y_ref + L4 + dy_crank + L8),      # Ln/8 düz uzatma (düz uç)
         ]
     else:
         # Alt kenar (y_ref = y1, döşeme yüzü)
@@ -1069,13 +1104,14 @@ def _draw_support_extra_y(w, x_ref, y_ref, bw_mm, choice, Ln_long, is_top=True):
         pts = [
             (x_ref, y_beam_center),                              # Kiriş merkezi
             (x_ref, y_ref - L4),                                 # Ln/4 düz (kiriş yüzünden)
-            (x_ref - d_crank, y_ref - L4 - dy_crank),           # 134° pilye kırılma
-            (x_ref - d_crank, y_ref - L4 - dy_crank - L8),      # Ln/8 düz uzatma (düz uç)
+            (x_ref + d_crank, y_ref - L4 - dy_crank),           # 134° pilye kırılma (Ters çevrildi: +)
+            (x_ref + d_crank, y_ref - L4 - dy_crank - L8),      # Ln/8 düz uzatma (düz uç)
         ]
     
     w.add_polyline(pts, layer="REB_EK_MESNET")
     lbl_y = y_ref + (L4/2.0) if is_top else y_ref - (L4/2.0)
-    w.add_text(x_ref + 20, lbl_y, f"Ek {choice.label()}", height=80, layer="TEXT", rotation=90, center=True)
+    # Vertical Ek: text to the left now (-100) to avoid shifted line (+d_crank)
+    w.add_text(x_ref - 100, lbl_y, f"Ek {choice.label()}", height=80, layer="TEXT", rotation=90, center=True)
 
 
 
@@ -1160,7 +1196,7 @@ def _draw_balcony_reinforcement_detail(
                     (x_dist + free_hook, iy1),   # Alt kenarda kanca (sağa)
                 ]
                 w.add_polyline(pts_dist, layer="REB_BALCONY_DIST")
-                w.add_text(x_dist + 30, iy0 + (Ly / 6.0), f"Dağ. {ch_dist.label()}", height=80, layer="TEXT", rotation=90)
+                w.add_text(x_dist + 30, iy0 + (Ly / 6.0), f"dagitma {ch_dist.label()}", height=80, layer="TEXT", rotation=90)
 
         elif fixed == "R":
             # Sağ taraf sabit, Sol taraf serbest
@@ -1187,7 +1223,7 @@ def _draw_balcony_reinforcement_detail(
                     (x_dist + free_hook, iy1),
                 ]
                 w.add_polyline(pts_dist, layer="REB_BALCONY_DIST")
-                w.add_text(x_dist + 30, iy0 + (Ly / 6.0), f"Dağ. {ch_dist.label()}", height=80, layer="TEXT", rotation=90)
+                w.add_text(x_dist + 30, iy0 + (Ly / 6.0), f"dagitma {ch_dist.label()}", height=80, layer="TEXT", rotation=90)
 
         elif fixed == "T":
             # Üst taraf sabit, Alt taraf serbest
@@ -1214,7 +1250,7 @@ def _draw_balcony_reinforcement_detail(
                     (ix1, y_dist + free_hook),   # Sağ kenarda kanca (aşağı - ters)
                 ]
                 w.add_polyline(pts_dist, layer="REB_BALCONY_DIST")
-                w.add_text(ix0 + (Lx / 6.0), y_dist - 30, f"Dağ. {ch_dist.label()}", height=80, layer="TEXT")
+                w.add_text(ix0 + (Lx / 6.0), y_dist - 30, f"dagitma {ch_dist.label()}", height=80, layer="TEXT")
 
         elif fixed == "B":
             # Alt taraf sabit, Üst taraf serbest
@@ -1241,7 +1277,7 @@ def _draw_balcony_reinforcement_detail(
                     (ix1, y_dist + free_hook),
                 ]
                 w.add_polyline(pts_dist, layer="REB_BALCONY_DIST")
-                w.add_text(ix0 + (Lx / 6.0), y_dist - 30, f"Dağ. {ch_dist.label()}", height=80, layer="TEXT")
+                w.add_text(ix0 + (Lx / 6.0), y_dist - 30, f"dagitma {ch_dist.label()}", height=80, layer="TEXT")
 
 
 def _get_neighbor_id_on_edge(system, sid, edge):
@@ -1358,7 +1394,7 @@ def _draw_hat_bar(w, cx, cy, bw_mm, choice, L_ext_left, L_ext_right, axis="X"):
         # Standart: Sağa kır (cx + d)
         
         x_main = cx
-        x_shifted = cx - d # Sola kırılmış hali (yukarı yön)
+        x_shifted = cx + d # Sağa kırılmış hali (Ters çevrildi: +)
         
         # Noktalar (Üstten Alta)
         pts.append((x_shifted, y_tail_end))      # Üst Kuyruk Ucu
@@ -1369,4 +1405,4 @@ def _draw_hat_bar(w, cx, cy, bw_mm, choice, L_ext_left, L_ext_right, axis="X"):
         pts.append((x_shifted, y_tail_end_B))    # Alt Kuyruk Ucu
         
         w.add_polyline(pts, layer="REB_EK_MESNET")
-        w.add_text(x_main - 30, cy, f"Ek {choice.label()}", height=100, layer="TEXT", rotation=90, center=True)
+        w.add_text(x_main - 100, cy, f"Ek {choice.label()}", height=100, layer="TEXT", rotation=90, center=True)
