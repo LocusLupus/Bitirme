@@ -287,6 +287,21 @@ def _draw_support_rebar_vertical(w: _DXFWriter, x0, y0, x1, y1, count: int, laye
         w.add_text(mid_x, y1 + 50, label, height=100, layer="TEXT")
 
 
+# =========================================================
+# Ek Donatı Yardımcıları (Ln/4 Kuralı)
+# =========================================================
+
+def _get_single_side_ext(system: SlabSystem, sid: str, axis: str) -> float:
+    """
+    Döşemenin belirtilen eksenindeki (Lx veya Ly) brüt açıklığının 1/4'ünü döndürür.
+    """
+    if not system or not sid or sid not in system.slabs:
+        return 500.0  # Default fallback
+    s = system.slabs[sid]
+    lx_g, ly_g = s.size_m_gross()
+    val = (lx_g if axis.upper() == "X" else ly_g) * 1000.0
+    return val / 4.0
+
 def _draw_oneway_reinforcement_detail(
     w: _DXFWriter,
     sid: str,
@@ -294,29 +309,25 @@ def _draw_oneway_reinforcement_detail(
     dcache: dict,
     x0: float, y0: float, x1: float, y1: float,
     bw_mm: float,
-    slab_index: int = 0
+    slab_index: int = 0,
+    system: SlabSystem = None # system eklendi
 ):
     """
     Tek doğrultulu döşeme için detaylı donatı krokisi çizer.
-    Referans görüntüdeki gibi:
-    - Ana donatı (düz + pilye): sadece 1'er adet çizilir.
-    - Dağıtma donatısı: 1-2 adet.
-    - Yazı konumları: Line'dan 30mm uzakta, başlangıçtan Ln/6 ötede.
     """
     cover = float(dcache.get("cover_mm", 25.0))
     auto_dir = dcache.get("auto_dir", "X")
     choices = dcache.get("choices", {})
     edge_cont = dcache.get("edge_continuity", {})
     
-    # İç sınırlar (pas payı düşülmüş)
+    # İç sınırlar
     ix0, iy0, ix1, iy1 = x0 + cover, y0 + cover, x1 - cover, y1 - cover
     if ix1 <= ix0 or iy1 <= iy0:
         return
     
-    Lx = ix1 - ix0  # mm
-    Ly = iy1 - iy0  # mm
+    Lx = ix1 - ix0
+    Ly = iy1 - iy0
     
-    # Donatı seçimleri
     ch_duz = choices.get("duz")
     ch_pilye = choices.get("pilye")
     ch_dist = choices.get("dist")
@@ -327,288 +338,181 @@ def _draw_oneway_reinforcement_detail(
     ch_ek_start = choices.get("mesnet_ek_start")
     ch_ek_end = choices.get("mesnet_ek_end")
     
-    # Kenar süreklilik durumları
-    uzun_start_cont = edge_cont.get("uzun_start", False)
-    uzun_end_cont = edge_cont.get("uzun_end", False)
-    kisa_start_cont = edge_cont.get("kisa_start", False)
-    kisa_end_cont = edge_cont.get("kisa_end", False)
+    kenar_cont = dcache.get("edge_continuity", {})
+    cont_L = kenar_cont.get("uzun_start", False) if auto_dir=="X" else kenar_cont.get("kisa_start", False)
+    # Bu cont mantığı biraz karışık. En iyisi dcache'ten doğrudan alalım.
+    # _draw_oneway call'unda dcache içindeki edge_continuity kullanılıyor.
     
-    # Orta noktalar
     midx = (ix0 + ix1) / 2.0
     midy = (iy0 + iy1) / 2.0
     
-    # =========================================================
-    # Ana Donatı Doğrultusu: Kısa kenara paralel
-    # =========================================================
-    if auto_dir == "X":
-        # X yönü kısa -> Ana donatı Dikey (Y boyunca)
-        Ln_long = Ly
-        
-        # --- 1. ANA DONATI (DÜZ + PİLYE) - Dikey ---
-        # Zincir döşemeler için ±150mm (15cm) stagger (örüntülü)
-        stagger = 400.0 if (slab_index % 2 == 0) else -400.0
-        x_duz = midx - 1.5 * bw_mm + stagger
-        x_pilye = midx + 1.5 * bw_mm + stagger
-        
-        # Düz
-        if ch_duz:
-            pts_duz = _draw_straight_hit_polyline(x_duz, iy0, x_duz, iy1, bw_mm, bw_mm)
-            w.add_polyline(pts_duz, layer="REB_MAIN_DUZ")
-            
-            # Label: Line'dan 100mm solda, Başlangıçtan (iy0) Ln/6 aşağıda.
-            lbl_y = iy0 + (Ln_long / 6.0)
-            w.add_text(x_duz - 100, lbl_y, f"duz  {ch_duz.label()}", height=100, layer="TEXT", rotation=90)
+    # Kanca ve uzama
+    hook_ext = bw_mm - 30.0
+    d_crank = 200.0
 
-        # Pilye (mirror=False: ters çevrildi)
+    if auto_dir == "X":
+        # Span = Y. Main rebar is Vertical.
+        # Main rebar is Vertical (along Y). Crossing horizontal beams (T/B).
+        # Distribution/Side supports are Horizontal (along X). Crossing vertical beams (L/R).
+        x_duz = midx - 1.5 * bw_mm + (400.0 if (slab_index % 2 == 0) else -400.0)
+        x_pilye = midx + 1.5 * bw_mm + (400.0 if (slab_index % 2 == 0) else -400.0)
+        
+        # 1. Main Rebar (Vertical)
+        if ch_duz:
+            pts = _draw_straight_hit_polyline(x_duz, iy0, x_duz, iy1, bw_mm, bw_mm)
+            w.add_polyline(pts, layer="REB_MAIN_DUZ")
+            w.add_text(x_duz - 100, iy0 + Ly/6, f"duz {ch_duz.label()}", height=100, layer="TEXT", rotation=90)
         if ch_pilye:
             pts = _pilye_polyline(x_pilye, iy0, x_pilye, iy1, d=200.0, kink="both", hook_len=bw_mm, beam_ext=bw_mm, mirror=False)
             w.add_polyline(pts, layer="REB_MAIN_PILYE")
+            w.add_text(x_pilye + 100, iy0 + Ly/6, f"pilye {ch_pilye.label()}", height=100, layer="TEXT", rotation=90)
             
-            # Label: Line'dan 100mm sağda
-            lbl_y = iy0 + (Ln_long / 6.0)
-            w.add_text(x_pilye + 100, lbl_y, f"pilye {ch_pilye.label()}", height=100, layer="TEXT", rotation=90)
-        
-        # --- 2. DAĞITMA DONATISI - Yatay ---
+        # 2. Distribution (Horizontal) - crossing L/R
         if ch_dist:
-            # Dağıtma: merkezden +1.5*bw (mesnet donatısıyla arası 3*bw)
             y_dist = midy + 1.5 * bw_mm
-            hook_ext = bw_mm - 30.0
             pts = []
+            if not edge_cont.get("kisa_start"): # Left
+                pts.append((x0 - hook_ext, y_dist - hook_ext)); pts.append((x0 - hook_ext, y_dist))
+            else: pts.append((x0, y_dist)) # Changed from x0-hook_ext to x0
             
-            # Sol (Check continuity)
-            if not kisa_start_cont:
-                pts.append((x0 - hook_ext, y_dist - hook_ext))
-                pts.append((x0 - hook_ext, y_dist))
-            else:
-                pts.append((x0 - hook_ext, y_dist))
+            pts.append((x1, y_dist)) # Add the main horizontal segment
             
-            # Sağ (Check continuity)
-            if not kisa_end_cont:
-                pts.append((x1 + hook_ext, y_dist))
-                pts.append((x1 + hook_ext, y_dist - hook_ext))
-            else:
-                pts.append((x1 + hook_ext, y_dist))
-                
+            if not edge_cont.get("kisa_end"): # Right
+                pts.append((x1 + hook_ext, y_dist)); pts.append((x1 + hook_ext, y_dist - hook_ext))
+            else: pts.append((x1, y_dist)) # Changed from x1+hook_ext to x1
             w.add_polyline(pts, layer="REB_DIST")
-            # Label: Line üstü (+30), Başlangıçtan (x0) Lx/6 sağda
-            w.add_text(x0 + (Lx / 6.0), y_dist + 30, f"dagitma {ch_dist.label()}", height=100, layer="TEXT", center=True)
+            w.add_text(x0 + Lx/6, y_dist + 30, f"dagitma {ch_dist.label()}", height=100, layer="TEXT", center=True)
 
-        # --- 3. KENAR MESNET (Yatay) ---
-        # Mesnet: merkezden -1.5*bw (dağıtma donatısıyla arası 3*bw)
-        offset_support = 1.5 * bw_mm
-        
-        if ch_kenar_start and not kisa_start_cont:
-            hook_ext = bw_mm - 30.0
-            ext = Lx / 4.0
-            d_crank = 200.0  # 45° kırılma mesafesi
-            y_k = midy - offset_support
-            # Sol kenardan gelen mesnet: kiriş içine, Lx/4-d_crank düz, 45° kırılma, düz uzatma
-            L8 = Lx / 8.0
-            pts = [
-                (x0 - hook_ext, y_k + bw_mm),                            # Kanca ucu (yukarı, bw kadar)
-                (x0 - hook_ext, y_k),                                    # Kiriş içi başlangıç
-                (ix0 + ext - d_crank, y_k),                              # Kırılma öncesi (geriye alınmış)
-                (ix0 + ext, y_k + d_crank),                              # 45° kırılma
-                (ix0 + ext + L8, y_k + d_crank),                         # Düz uzatma
-            ]
+        # 3 & 4. Supports on L/R (Horizontal)
+        y_k = midy - 1.5 * bw_mm
+        # Left
+        if ch_ic_start and edge_cont.get("kisa_start"): # Interior
+            L_self = _get_single_side_ext(system, sid, "X")
+            nb_id, _ = _get_neighbor_id_on_edge(system, sid, "L")
+            L_nb = _get_single_side_ext(system, nb_id, "X") if nb_id else L_self
+            # Let's use _draw_hat_bar logic instead
+            _draw_hat_bar(w, x0 - bw_mm/2, y_k, bw_mm, ch_ic_start, L_ext_left=L_nb, L_ext_right=L_self, axis="X")
+        elif ch_kenar_start and not edge_cont.get("kisa_start"): # Edge
+            L_self = _get_single_side_ext(system, sid, "X") # Ln/4
+            L10 = L_self / 2.5 # (Ln/4) / 2.5 = Ln/10
+            pts = [(x0 - hook_ext, y_k + bw_mm), (x0 - hook_ext, y_k), (ix0 + L_self - d_crank, y_k), (ix0 + L_self, y_k + d_crank), (ix0 + L_self + L10, y_k + d_crank)]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x0 + ext/2, y_k + 30, ch_kenar_start.label(), height=80, layer="TEXT", center=True)
-            
-        if ch_kenar_end and not kisa_end_cont:
-            hook_ext = bw_mm - 30.0
-            ext = Lx / 4.0
-            d_crank = 200.0
-            y_k = midy - offset_support
-            # Sağ kenardan gelen mesnet: kiriş içine, Lx/4-d_crank düz, 45° kırılma, düz uzatma
-            L8 = Lx / 8.0
-            pts = [
-                (x1 + hook_ext, y_k + bw_mm),                            # Kanca ucu (yukarı, bw kadar)
-                (x1 + hook_ext, y_k),                                    # Kiriş içi başlangıç
-                (ix1 - ext + d_crank, y_k),                              # Kırılma öncesi
-                (ix1 - ext, y_k + d_crank),                              # 45° kırılma
-                (ix1 - ext - L8, y_k + d_crank),                         # Düz uzatma
-            ]
+            w.add_text(x0 + L_self/2, y_k + 30, ch_kenar_start.label(), height=80, layer="TEXT", center=True)
+
+        # Right
+        if ch_ic_end and edge_cont.get("kisa_end"): # Interior
+            L_self = _get_single_side_ext(system, sid, "X")
+            nb_id, _ = _get_neighbor_id_on_edge(system, sid, "R")
+            L_nb = _get_single_side_ext(system, nb_id, "X") if nb_id else L_self
+            _draw_hat_bar(w, x1 + bw_mm/2, y_k, bw_mm, ch_ic_end, L_ext_left=L_self, L_ext_right=L_nb, axis="X")
+        elif ch_kenar_end and not edge_cont.get("kisa_end"): # Edge
+            L_self = _get_single_side_ext(system, sid, "X") # Ln/4
+            L10 = L_self / 2.5 # (Ln/4) / 2.5 = Ln/10
+            pts = [(x1 + hook_ext, y_k + bw_mm), (x1 + hook_ext, y_k), (ix1 - L_self + d_crank, y_k), (ix1 - L_self, y_k + d_crank), (ix1 - L_self - L10, y_k + d_crank)]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x1 - ext/2, y_k + 30, ch_kenar_end.label(), height=80, layer="TEXT", center=True)
+            w.add_text(x1 - L_self/2, y_k + 30, ch_kenar_end.label(), height=80, layer="TEXT", center=True)
 
-        # --- 4. İÇ MESNET (Yatay) ---
-        if ch_ic_start and kisa_start_cont:
-            L4 = Lx / 4.0
-            L8 = Lx / 8.0
-            d_crank = 200.0
-            start_x = x0 - (bw_mm / 2.0)
-            y = midy - 1.5 * bw_mm
-            pts = [
-                (start_x, y),
-                (x0 + L4, y),
-                (x0 + L4 + d_crank, y + d_crank),
-                (x0 + L4 + d_crank + L8, y + d_crank)
-            ]
-            w.add_polyline(pts, layer="REB_IC_MESNET")
-            w.add_text(x0 + L4/2, y + 30, f"{ch_ic_start.label()}", height=80, layer="TEXT", center=True)
-
-        if ch_ic_end and kisa_end_cont:
-            L4 = Lx / 4.0
-            L8 = Lx / 8.0
-            d_crank = 200.0
-            start_x = x1 + (bw_mm / 2.0)
-            y = midy - 1.5 * bw_mm
-            pts = [
-                (start_x, y),
-                (x1 - L4, y),
-                (x1 - L4 - d_crank, y + d_crank),
-                (x1 - L4 - d_crank - L8, y + d_crank)
-            ]
-            w.add_polyline(pts, layer="REB_IC_MESNET")
-            w.add_text(x1 - L4/2, y + 30, f"{ch_ic_end.label()}", height=80, layer="TEXT", center=True)
-
-        # --- 5. MESNET EK (Dikey) ---
-        if ch_ek_start or ch_ek_end:
-            # Ek donatısı paralel olan ana donatılardan (düz/pilye) 2*bw uzakta olsun
-            # Ana donatıların merkezden (midx) maksimum uzaklığını bul
-            max_x_main = 0.0
-            if ch_duz:
-                max_x_main = max(max_x_main, abs(x_duz - midx))
-            if ch_pilye:
-                max_x_main = max(max_x_main, abs(x_pilye - midx))
-            
-            # offset_val: midx'ten itibaren mesafe. Gap = 2*bw
-            offset_val = max_x_main + 2.0 * bw_mm
-
-            if ch_ek_start and uzun_start_cont: # Top
-                _draw_support_extra_y(w, midx + offset_val, y0, bw_mm, ch_ek_start, Ln_long, is_top=True)
-                
-            if ch_ek_end and uzun_end_cont: # Bottom
-                _draw_support_extra_y(w, midx + offset_val, y1, bw_mm, ch_ek_end, Ln_long, is_top=False)
-            
-    else:  # auto_dir == "Y"
-        Ln_long = Lx
-        
-        # --- 1. ANA DONATI (DÜZ + PİLYE) - Yatay ---
-        # Zincir döşemeler için ±150mm (15cm) stagger (örüntülü)
-        stagger = 400.0 if (slab_index % 2 == 0) else -400.0
-        y_duz = midy + 1.5 * bw_mm + stagger
-        y_pilye = midy - 1.5 * bw_mm + stagger
-        
+        # 5. Mesnet Ek on T/B (Vertical) - load direction
+        max_x_main = 0.0
         if ch_duz:
-            pts_duz = _draw_straight_hit_polyline(ix0, y_duz, ix1, y_duz, bw_mm, bw_mm)
-            w.add_polyline(pts_duz, layer="REB_MAIN_DUZ")
-            w.add_text(x0 + (Ln_long / 6.0), y_duz + 30, f"duz {ch_duz.label()}", height=100, layer="TEXT", center=True)
-            
+            max_x_main = max(max_x_main, abs(x_duz - midx))
+        if ch_pilye:
+            max_x_main = max(max_x_main, abs(x_pilye - midx))
+        offset_val = max_x_main + 2.0 * bw_mm
+        # Top
+        if ch_ek_start and edge_cont.get("uzun_start"):
+            L_self = _get_single_side_ext(system, sid, "Y")
+            nb_id, _ = _get_neighbor_id_on_edge(system, sid, "T")
+            L_nb = _get_single_side_ext(system, nb_id, "Y") if nb_id else L_self
+            _draw_hat_bar(w, midx + offset_val, y0 - bw_mm/2, bw_mm, ch_ek_start, L_ext_left=L_nb, L_ext_right=L_self, axis="Y")
+        # Bottom
+        if ch_ek_end and edge_cont.get("uzun_end"):
+            L_self = _get_single_side_ext(system, sid, "Y")
+            nb_id, _ = _get_neighbor_id_on_edge(system, sid, "B")
+            L_nb = _get_single_side_ext(system, nb_id, "Y") if nb_id else L_self
+            _draw_hat_bar(w, midx + offset_val, y1 + bw_mm/2, bw_mm, ch_ek_end, L_ext_left=L_self, L_ext_right=L_nb, axis="Y")
+
+    else: # auto_dir == "Y"
+        # Span = X. Main rebar is Horizontal.
+        # Main rebar is Horizontal (along X). Crossing vertical beams (L/R).
+        # Distribution/Side supports are Vertical (along Y). Crossing horizontal beams (T/B).
+        y_duz = midy + 1.5 * bw_mm + (400.0 if (slab_index % 2 == 0) else -400.0)
+        y_pilye = midy - 1.5 * bw_mm + (400.0 if (slab_index % 2 == 0) else -400.0)
+        
+        # 1. Main Rebar (Horizontal)
+        if ch_duz:
+            pts = _draw_straight_hit_polyline(ix0, y_duz, ix1, y_duz, bw_mm, bw_mm)
+            w.add_polyline(pts, layer="REB_MAIN_DUZ")
+            w.add_text(x0 + Lx/6, y_duz + 30, f"duz {ch_duz.label()}", height=100, layer="TEXT", center=True)
         if ch_pilye:
             pts = _pilye_polyline(ix0, y_pilye, ix1, y_pilye, d=200.0, kink="both", hook_len=bw_mm, beam_ext=bw_mm, mirror=True)
             w.add_polyline(pts, layer="REB_MAIN_PILYE")
-            w.add_text(x0 + (Ln_long / 6.0), y_pilye + 30, f"pilye {ch_pilye.label()}", height=100, layer="TEXT", center=True)
+            w.add_text(x0 + Lx/6, y_pilye + 30, f"pilye {ch_pilye.label()}", height=100, layer="TEXT", center=True)
 
-        # --- 2. DAĞITMA (Dikey) ---
+        # 2. Distribution (Vertical) - crossing T/B
         if ch_dist:
-            # Dağıtma: merkezden +1.5*bw (mesnet donatısıyla arası 3*bw)
             x_dist = midx + 1.5 * bw_mm
-            hook_ext = bw_mm - 30.0
             pts = []
-            if not kisa_start_cont:
-                 pts.append((x_dist - hook_ext, y0 - hook_ext))
-                 pts.append((x_dist, y0 - hook_ext))
-                 pts.append((x_dist, y0))
-            else:
-                 pts.append((x_dist, y0)) 
+            if not edge_cont.get("kisa_start"): # Top
+                pts.extend([(x_dist - hook_ext, y0 - hook_ext), (x_dist, y0 - hook_ext), (x_dist, y0)])
+            else: pts.append((x_dist, y0))
             
-            if not kisa_end_cont:
-                 pts.append((x_dist, y1))
-                 pts.append((x_dist, y1 + hook_ext))
-                 pts.append((x_dist - hook_ext, y1 + hook_ext))
-            else:
-                 pts.append((x_dist, y1))
+            pts.append((x_dist, y1)) # Add the main vertical segment
             
+            if not edge_cont.get("kisa_end"): # Bottom
+                pts.extend([(x_dist, y1), (x_dist, y1 + hook_ext), (x_dist - hook_ext, y1 + hook_ext)])
+            else: pts.append((x_dist, y1))
             w.add_polyline(pts, layer="REB_DIST")
-            lbl_y = y0 + (Ly / 6.0)
-            w.add_text(x_dist + 100, lbl_y, f"dagitma {ch_dist.label()}", height=100, layer="TEXT", rotation=90)
+            w.add_text(x_dist + 100, y0 + Ly/6, f"dagitma {ch_dist.label()}", height=100, layer="TEXT", rotation=90)
 
-        # --- 3. KENAR MESNET (Dikey) ---
-        # Mesnet: merkezden -1.5*bw (dağıtma donatısıyla arası 3*bw)
-        offset_support = 1.5 * bw_mm
-        
-        if ch_kenar_start and not kisa_start_cont: # Top
-            hook_ext = bw_mm - 30.0
-            ext = Ly / 4.0
-            d_crank = 200.0
-            x_k = midx - offset_support
-            # Üst kenardan gelen mesnet: kiriş içine, Ly/4-d_crank düz, 45° kırılma, düz uzatma
-            L8 = Ly / 8.0
-            pts = [
-                (x_k + bw_mm, y0 - hook_ext),                            # Kanca ucu (sağa, bw kadar)
-                (x_k, y0 - hook_ext),                                    # Kiriş içi başlangıç
-                (x_k, iy0 + ext - d_crank),                              # Kırılma öncesi
-                (x_k + d_crank, iy0 + ext),                              # 45° kırılma
-                (x_k + d_crank, iy0 + ext + L8),                         # Düz uzatma
-            ]
+        # 3 & 4. Supports on T/B (Vertical)
+        x_k = midx - 1.5 * bw_mm
+        # Top
+        if ch_ic_start and edge_cont.get("kisa_start"): # Interior
+            L_self = _get_single_side_ext(system, sid, "Y")
+            nb_id, _ = _get_neighbor_id_on_edge(system, sid, "T")
+            L_nb = _get_single_side_ext(system, nb_id, "Y") if nb_id else L_self
+            _draw_hat_bar(w, x_k, y0 - bw_mm/2, bw_mm, ch_ic_start, L_ext_left=L_nb, L_ext_right=L_self, axis="Y")
+        elif ch_kenar_start and not edge_cont.get("kisa_start"): # Edge
+            L_self = _get_single_side_ext(system, sid, "Y") # Ln/4
+            L10 = L_self / 2.5 # (Ln/4) / 2.5 = Ln/10
+            pts = [(x_k + bw_mm, y0 - hook_ext), (x_k, y0 - hook_ext), (x_k, iy0 + L_self - d_crank), (x_k + d_crank, iy0 + L_self), (x_k + d_crank, iy0 + L_self + L10)]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x_k - 100, y0 + ext/2, ch_kenar_start.label(), height=80, layer="TEXT", rotation=90)
-            
-        if ch_kenar_end and not kisa_end_cont: # Bottom
-            hook_ext = bw_mm - 30.0
-            ext = Ly / 4.0
-            d_crank = 200.0
-            x_k = midx - offset_support
-            # Alt kenardan gelen mesnet: kiriş içine, Ly/4-d_crank düz, 45° kırılma, düz uzatma
-            L8 = Ly / 8.0
-            pts = [
-                (x_k + bw_mm, y1 + hook_ext),                            # Kanca ucu (sağa, bw kadar)
-                (x_k, y1 + hook_ext),                                    # Kiriş içi başlangıç
-                (x_k, iy1 - ext + d_crank),                              # Kırılma öncesi
-                (x_k + d_crank, iy1 - ext),                              # 45° kırılma
-                (x_k + d_crank, iy1 - ext - L8),                         # Düz uzatma
-            ]
+            w.add_text(x_k - 100, y0 + L_self/2, ch_kenar_start.label(), height=80, layer="TEXT", rotation=90)
+        # Bottom
+        if ch_ic_end and edge_cont.get("kisa_end"): # Interior
+            L_self = _get_single_side_ext(system, sid, "Y")
+            nb_id, _ = _get_neighbor_id_on_edge(system, sid, "B")
+            L_nb = _get_single_side_ext(system, nb_id, "Y") if nb_id else L_self
+            _draw_hat_bar(w, x_k, y1 + bw_mm/2, bw_mm, ch_ic_end, L_ext_left=L_self, L_ext_right=L_nb, axis="Y")
+        elif ch_kenar_end and not edge_cont.get("kisa_end"): # Edge
+            L_self = _get_single_side_ext(system, sid, "Y") # Ln/4
+            L10 = L_self / 2.5 # (Ln/4) / 2.5 = Ln/10
+            pts = [(x_k + bw_mm, y1 + hook_ext), (x_k, y1 + hook_ext), (x_k, iy1 - L_self + d_crank), (x_k + d_crank, iy1 - L_self), (x_k + d_crank, iy1 - L_self - L10)]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x_k - 100, y1 - ext/2, ch_kenar_end.label(), height=80, layer="TEXT", rotation=90)
+            w.add_text(x_k - 100, y1 - L_self/2, ch_kenar_end.label(), height=80, layer="TEXT", rotation=90)
 
-        # --- 4. İÇ MESNET (Dikey) ---
-        if ch_ic_start and kisa_start_cont: # Top
-            L4 = Ly / 4.0
-            L8 = Ly / 8.0
-            d_crank = 200.0
-            start_y = y0 - (bw_mm / 2.0)
-            x = midx - 1.5 * bw_mm
-            pts = [
-                (x, start_y),
-                (x, y0 + L4),
-                (x + d_crank, y0 + L4 + d_crank),
-                (x + d_crank, y0 + L4 + d_crank + L8)
-            ]
-            w.add_polyline(pts, layer="REB_IC_MESNET")
-            w.add_text(x - 100, y0 + L4/2, f"{ch_ic_start.label()}", height=80, layer="TEXT", rotation=90)
+        # 5. Mesnet Ek on L/R (Horizontal) - load direction
+        max_y_main = 0.0
+        if ch_duz:
+            max_y_main = max(max_y_main, abs(y_duz - midy))
+        if ch_pilye:
+            max_y_main = max(max_y_main, abs(y_pilye - midy))
             
-        if ch_ic_end and kisa_end_cont: # Bottom
-            L4 = Ly / 4.0
-            L8 = Ly / 8.0
-            d_crank = 200.0
-            start_y = y1 + (bw_mm / 2.0)
-            x = midx - 1.5 * bw_mm
-            pts = [
-                (x, start_y),
-                (x, y1 - L4),
-                (x + d_crank, y1 - L4 - d_crank),
-                (x + d_crank, y1 - L4 - d_crank - L8)
-            ]
-            w.add_polyline(pts, layer="REB_IC_MESNET")
-            w.add_text(x - 100, y1 - L4/2, f"{ch_ic_end.label()}", height=80, layer="TEXT", rotation=90)
-
-        # --- 5. EK MESNET (Yatay) ---
-        if ch_ek_start or ch_ek_end:
-            # Ana donatıların merkezden (midy) maksimum uzaklığını bul
-            max_y_main = 0.0
-            if ch_duz:
-                max_y_main = max(max_y_main, abs(y_duz - midy))
-            if ch_pilye:
-                max_y_main = max(max_y_main, abs(y_pilye - midy))
-            
-            offset_val = max_y_main + 2.0 * bw_mm
-
-            if ch_ek_start and uzun_start_cont: # Left
-                _draw_support_extra_x(w, x0, midy + offset_val, bw_mm, ch_ek_start, Ln_long, is_left=True)
+        offset_val = max_y_main + 2.0 * bw_mm
+        # Left
+        if ch_ek_start and edge_cont.get("uzun_start"):
+            L_self = _get_single_side_ext(system, sid, "X")
+            nb_id, _ = _get_neighbor_id_on_edge(system, sid, "L")
+            L_nb = _get_single_side_ext(system, nb_id, "X") if nb_id else L_self
+            _draw_hat_bar(w, x0 - bw_mm/2, midy + offset_val, bw_mm, ch_ek_start, L_ext_left=L_nb, L_ext_right=L_self, axis="X")
                 
-            if ch_ek_end and uzun_end_cont: # Right
-                _draw_support_extra_x(w, x1, midy + offset_val, bw_mm, ch_ek_end, Ln_long, is_left=False)
+        # Right
+        if ch_ek_end and edge_cont.get("uzun_end"):
+            L_self = _get_single_side_ext(system, sid, "X")
+            nb_id, _ = _get_neighbor_id_on_edge(system, sid, "R")
+            L_nb = _get_single_side_ext(system, nb_id, "X") if nb_id else L_self
+            _draw_hat_bar(w, x1 + bw_mm/2, midy + offset_val, bw_mm, ch_ek_end, L_ext_left=L_self, L_ext_right=L_nb, axis="X")
 
 
 def export_to_dxf(system: SlabSystem, filename: str, design_cache: dict, bw_val: float,
@@ -802,7 +706,7 @@ def export_to_dxf(system: SlabSystem, filename: str, design_cache: dict, bw_val:
         kind = dcache.get("kind")
 
         if kind == "ONEWAY":
-            _draw_oneway_reinforcement_detail(w, sid, s, dcache, x0, y0, x1, y1, bw_mm, slab_index=idx)
+            _draw_oneway_reinforcement_detail(w, sid, s, dcache, x0, y0, x1, y1, bw_mm, slab_index=idx, system=system)
 
         elif kind == "TWOWAY":
             _draw_twoway_reinforcement_detail(w, sid, s, dcache, x0, y0, x1, y1, bw_mm, slab_index=idx, system=system)
@@ -903,39 +807,34 @@ def _draw_twoway_reinforcement_detail(
         # Label: Line Üstü (+30), Başlangıçtan (x0) Lx/6 sağda
         w.add_text(x0 + (Lx / 6.0), y_pilye_x + 30, f"X pilye {ch_x_pilye.label()}", height=100, layer="TEXT", center=True)
 
-    # X Yönü Mesnet Ek
-    if ch_x_ek:
-        # Mesnet ekleri: SADECE SAĞ (R) KENARDA ÇİZİLİR (Süreklilik varsa)
-        if cont_R:
-             # Sağ Komşuyu bul
-            neighbor_id, neighbor_kind = _get_neighbor_id_on_edge(system, sid, "R")
-            L_ext_self = Lx / 5.0
-            L_ext_neigh = L_ext_self
+    # X Yönü Mesnet Ek Donatıları (L ve R kenarları)
+    support_extra = choices.get("support_extra", {})
+    
+    for edge in ["L", "R"]:
+        choice_ek = support_extra.get(edge)
+        if not choice_ek:
+            continue
             
-            if neighbor_id and system:
-                try:
-                    ns = system.slabs[neighbor_id]
-                    nLx_g, _ = ns.size_m_gross()
-                    nLx = (nLx_g * 1000.0) - bw_mm 
-                    if nLx > 0:
-                        L_ext_neigh = nLx / 5.0
-                except:
-                    pass
-            
+        neighbor_id, _ = _get_neighbor_id_on_edge(system, sid, edge)
+        L_self = _get_single_side_ext(system, sid, "X")
+        L_nb = _get_single_side_ext(system, neighbor_id, "X") if neighbor_id else L_self
+        
+        # cx: Kiriş merkezi
+        if edge == "L":
+            cx = x0 - (bw_mm / 2.0)
+            le, re = L_nb, L_self  # Solda komşu, sağda self
+        else: # R
             cx = x1 + (bw_mm / 2.0)
-            
-            # Y konumu: Paralel ana donatılardan 2*bw uzakta
-            max_y_main = 0.0
-            if ch_x_duz:
-                max_y_main = max(max_y_main, abs(y_duz_x - midy))
-            if ch_x_pilye:
-                max_y_main = max(max_y_main, abs(y_pilye_x - midy))
-            
-            cy = midy + max_y_main + 2.0 * bw_mm
-            
-            _draw_hat_bar(w, cx, cy, bw_mm, ch_x_ek, 
-                          L_ext_left=L_ext_self, L_ext_right=L_ext_neigh, 
-                          axis="X")
+            le, re = L_self, L_nb  # Solda self, sağda komşu
+        
+        max_y_main = 0.0
+        if ch_x_duz: max_y_main = max(max_y_main, abs(y_duz_x - midy))
+        if ch_x_pilye: max_y_main = max(max_y_main, abs(y_pilye_x - midy))
+        cy = midy + max_y_main + 2.0 * bw_mm
+        
+        _draw_hat_bar(w, cx, cy, bw_mm, choice_ek, L_ext_left=le, L_ext_right=re, axis="X")
+
+    # ... (Y Ana Donatılar aynen devam eder) ...
 
 
     # =========================================================
@@ -943,7 +842,6 @@ def _draw_twoway_reinforcement_detail(
     # =========================================================
     ch_y_duz = choices.get("y_span_duz")
     ch_y_pilye = choices.get("y_span_pilye")
-    ch_y_ek = choices.get("y_support_extra")
 
     # Spacing
     sy = ch_y_pilye.s_mm if ch_y_pilye else 200.0
@@ -987,40 +885,29 @@ def _draw_twoway_reinforcement_detail(
         lbl_y = y0 + (Ly / 6.0)
         w.add_text(x_pilye_y + 100, lbl_y, f"Y pilye {ch_y_pilye.label()}", height=100, layer="TEXT", rotation=90, center=True)
 
-    # Y Yönü Mesnet Ek
-    if ch_y_ek:
-        # Sadece ALT (B) Kenarda Çiz
-        if cont_B:
-            # Alt Komşuyu bul
-            neighbor_id, neighbor_kind = _get_neighbor_id_on_edge(system, sid, "B")
-            L_ext_self = Ly / 5.0
-            L_ext_neigh = L_ext_self
+    # Y Yönü Mesnet Ek Donatıları (T ve B kenarları)
+    for edge in ["T", "B"]:
+        choice_ek = support_extra.get(edge)
+        if not choice_ek:
+            continue
             
-            if neighbor_id and system:
-                try:
-                    ns = system.slabs[neighbor_id]
-                    _, nLy_g = ns.size_m_gross()
-                    nLy = (nLy_g * 1000.0) - bw_mm
-                    if nLy > 0:
-                        L_ext_neigh = nLy / 5.0
-                except:
-                    pass
-            
-            # Hat Çiz
-            # Merkez: y1 + bw/2 (Alt kirişin ortası)
-            # X konumu: Paralel ana donatılardan 2*bw uzakta (Sola doğru)
-            max_x_main = 0.0
-            if ch_y_duz:
-                max_x_main = max(max_x_main, abs(x_duz_y - midx))
-            if ch_y_pilye:
-                max_x_main = max(max_x_main, abs(x_pilye_y - midx))
-            
-            cx = midx - (max_x_main + 2.0 * bw_mm)
+        neighbor_id, _ = _get_neighbor_id_on_edge(system, sid, edge)
+        L_self = _get_single_side_ext(system, sid, "Y")
+        L_nb = _get_single_side_ext(system, neighbor_id, "Y") if neighbor_id else L_self
+        
+        if edge == "T":
+            cy = y0 - (bw_mm / 2.0)
+            le, re = L_nb, L_self  # Üstte komşu, altta self
+        else: # B
             cy = y1 + (bw_mm / 2.0)
-            
-            _draw_hat_bar(w, cx, cy, bw_mm, ch_y_ek, 
-                          L_ext_left=L_ext_self, L_ext_right=L_ext_neigh, 
-                          axis="Y")
+            le, re = L_self, L_nb  # Üstte self, altta komşu
+        
+        max_x_main = 0.0
+        if ch_y_duz: max_x_main = max(max_x_main, abs(x_duz_y - midx))
+        if ch_y_pilye: max_x_main = max(max_x_main, abs(x_pilye_y - midx))
+        cx = midx - (max_x_main + 2.0 * bw_mm)
+        
+        _draw_hat_bar(w, cx, cy, bw_mm, choice_ek, L_ext_left=le, L_ext_right=re, axis="Y")
 
     # Döşeme ID'si kaldırıldı (kullanıcı isteği)
 
@@ -1045,22 +932,22 @@ def _draw_support_extra_x(w, x_ref, y_ref, bw_mm, choice, Ln_long, is_left=True)
     if is_left:
         # Sol kenar (x_ref = x0, döşeme yüzü)
         x_beam_center = x_ref - half
-        # Kiriş merkezi -> kiriş yüzü -> Ln/4 düz -> 134° pilye -> Ln/8 düz
+        # Kiriş merkezi -> kiriş yüzü -> Ln/4 düz -> 134° pilye -> Ln/10 düz
         pts = [
             (x_beam_center, y_ref),                              # Kiriş merkezi
             (x_ref + L4, y_ref),                                 # Ln/4 düz (kiriş yüzünden)
             (x_ref + L4 + dx_crank, y_ref + d_crank),           # 134° pilye kırılma
-            (x_ref + L4 + dx_crank + L8, y_ref + d_crank),      # Ln/8 düz uzatma (düz uç)
+            (x_ref + L4 + dx_crank + L10, y_ref + d_crank),      # Ln/10 düz uzatma (düz uç)
         ]
     else:
         # Sağ kenar (x_ref = x1, döşeme yüzü)
         x_beam_center = x_ref + half
-        # Kiriş merkezi -> kiriş yüzü -> Ln/4 düz -> 134° pilye -> Ln/8 düz
+        # Kiriş merkezi -> kiriş yüzü -> Ln/4 düz -> 134° pilye -> Ln/10 düz
         pts = [
             (x_beam_center, y_ref),                              # Kiriş merkezi
             (x_ref - L4, y_ref),                                 # Ln/4 düz (kiriş yüzünden)
             (x_ref - L4 - dx_crank, y_ref + d_crank),           # 134° pilye kırılma
-            (x_ref - L4 - dx_crank - L8, y_ref + d_crank),      # Ln/8 düz uzatma (düz uç)
+            (x_ref - L4 - dx_crank - L10, y_ref + d_crank),      # Ln/10 düz uzatma (düz uç)
         ]
     
     w.add_polyline(pts, layer="REB_EK_MESNET")
@@ -1076,12 +963,12 @@ def _draw_support_extra_y(w, x_ref, y_ref, bw_mm, choice, Ln_long, is_top=True):
     - Kiriş merkezinden başlar.
     - Kiriş yüzünden Ln/4 kadar düz ilerler.
     - 134° pilye (46° kırılma) yapar.
-    - Ln/8 kadar düz uzar.
+    - Ln/10 kadar düz uzar.
     - Uç düz biter (kanca yok).
     """
     half = bw_mm / 2.0
     L4 = Ln_long / 4.0   # Pilye kırılma noktası (kiriş yüzünden itibaren)
-    L8 = Ln_long / 8.0   # Pilye sonrası düz uzatma
+    L10 = Ln_long / 10.0 # Pilye sonrası düz uzatma (tail length)
     d_crank = 200.0       # Pilye yatay bileşeni (dikey donatıda yatay kayma)
     # 134° açı -> kırılma açısı 46° -> dikey bileşen = d / tan(46°)
     dy_crank = d_crank / math.tan(math.radians(46))
@@ -1090,22 +977,22 @@ def _draw_support_extra_y(w, x_ref, y_ref, bw_mm, choice, Ln_long, is_top=True):
     if is_top:
         # Üst kenar (y_ref = y0, döşeme yüzü)
         y_beam_center = y_ref - half
-        # Kiriş merkezi -> kiriş yüzü -> Ln/4 düz -> 134° pilye -> Ln/8 düz
+        # Kiriş merkezi -> kiriş yüzü -> Ln/4 düz -> 134° pilye -> Ln/10 düz
         pts = [
             (x_ref, y_beam_center),                              # Kiriş merkezi
             (x_ref, y_ref + L4),                                 # Ln/4 düz (kiriş yüzünden)
             (x_ref + d_crank, y_ref + L4 + dy_crank),           # 134° pilye kırılma (Ters çevrildi: +)
-            (x_ref + d_crank, y_ref + L4 + dy_crank + L8),      # Ln/8 düz uzatma (düz uç)
+            (x_ref + d_crank, y_ref + L4 + dy_crank + L10),      # Ln/10 düz uzatma (düz uç)
         ]
     else:
         # Alt kenar (y_ref = y1, döşeme yüzü)
         y_beam_center = y_ref + half
-        # Kiriş merkezi -> kiriş yüzü -> Ln/4 düz -> 134° pilye -> Ln/8 düz
+        # Kiriş merkezi -> kiriş yüzü -> Ln/4 düz -> 134° pilye -> Ln/10 düz
         pts = [
             (x_ref, y_beam_center),                              # Kiriş merkezi
             (x_ref, y_ref - L4),                                 # Ln/4 düz (kiriş yüzünden)
             (x_ref + d_crank, y_ref - L4 - dy_crank),           # 134° pilye kırılma (Ters çevrildi: +)
-            (x_ref + d_crank, y_ref - L4 - dy_crank - L8),      # Ln/8 düz uzatma (düz uç)
+            (x_ref + d_crank, y_ref - L4 - dy_crank - L10),      # Ln/10 düz uzatma (düz uç)
         ]
     
     w.add_polyline(pts, layer="REB_EK_MESNET")
@@ -1322,8 +1209,8 @@ def _draw_hat_bar(w, cx, cy, bw_mm, choice, L_ext_left, L_ext_right, axis="X"):
     """
     
     d = 200.0  # Crank height/depth
-    tail_factor = 1.25 # Tail = 1.25 * L_ext (approx Ln/4 if L_ext=Ln/5)
-    # Ln/5 * 1.25 = Ln/4. Correct.
+    # Ln/4 * 0.4 = Ln/10. User requested Ln/10 tail length.
+    tail_factor = 0.4 
     
     tail_left = L_ext_left * tail_factor
     tail_right = L_ext_right * tail_factor

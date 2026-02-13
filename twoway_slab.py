@@ -296,10 +296,9 @@ def compute_twoway_report(system, sid: str, res: dict, conc: str, steel: str,
         lines.append(f"  {step}")
     lines.append(f"  Gerekli As_mesnet = {asxn:.1f} mm²/m")
     
-    # X mesnet ek donatısı kontrolü (L/R kenarları)
+    # X mesnet donatı kontrolü (L/R kenarları)
     As_pilye_x = ch_x_pilye.area_mm2_per_m
-    ch_x_il = None
-    max_As_ek_x = 0.0
+    choices_il = {"L": None, "R": None, "T": None, "B": None}
     
     for edge in ["L", "R"]:
         neighbor_id, neighbor_kind = get_neighbor_on_edge_twoway(system, sid, edge)
@@ -307,21 +306,13 @@ def compute_twoway_report(system, sid: str, res: dict, conc: str, steel: str,
         if neighbor_id is None:
             # Süreksiz kenar - mesnet ek donatısı gerekmez
             lines.append(f"  {edge} kenarı: Süreksiz → Mesnet ek donatısı gerekmez")
-            continue  # Bu kenarı atla
+            continue
             
         As_pilye_komsu = 0.0
         neighbor_info = ""
         
         if neighbor_kind == "BALCONY":
-            # Balkonda pilye yok ama 'mevcut' olarak kendi pilyemizi mi sayacağız?
-            # Kullanıcı isteği: "sağdaki pilye değeri ile soldaki döşemenin pilye değerini çıkartıp"
-            # Balkon varsa, balkonun pilyesi yoktur (genelde üst donatı vardır).
-            # Ancak kodda önce `As_mevcut = As_pilye_x` denmiş (sadece kendini sayıyor).
-            # Biz yine de komşu pilyeyi 0 alıp devam edelim.
             neighbor_info = f"BALCONY ({neighbor_id})"
-            # Balkonun üst donatısı aslında mesnet donatısıdır, ama burada 'pilye' olarak geçmiyor.
-            # Güvenli tarafta kalmak için 0 alıyoruz, belki balkonun kendi analizinden bir değer gelmeli.
-            # Şimdilik 0.
         else:
             As_pilye_komsu = neighbor_pilye_areas.get(neighbor_id, 0.0)
             neighbor_info = f"{neighbor_kind} ({neighbor_id})"
@@ -332,16 +323,13 @@ def compute_twoway_report(system, sid: str, res: dict, conc: str, steel: str,
         lines.append(f"  {edge} kenarı: {neighbor_info}")
         lines.append(f"    Gerekli: {asxn:.1f} - Mevcut: (Kendi:{As_pilye_x:.1f} + Komşu:{As_pilye_komsu:.1f} = {As_mevcut:.1f}) = Fark: {asxn - As_mevcut:.1f}")
         
-        if As_ek > max_As_ek_x:
-            max_As_ek_x = As_ek
-    
-    if max_As_ek_x > 1e-6:
-        ch_x_il = select_rebar_min_area(max_As_ek_x, 300)  # Mesnet ek donatısı için smax=300
-        if ch_x_il:
-            lines.append(f"  Max As_ek = {max_As_ek_x:.1f} mm²/m → Seçilen Ek Donatı: {ch_x_il.label_with_area()}")
-            lines.append(f"  (Bu donatı gerekli olan tüm X mesnetlerine (L/R) uygulanır.)")
-    else:
-        lines.append(f"  Pilye toplamları yeterli, ek donatı gerekmiyor.")
+        if As_ek > 1e-6:
+            ch_il = select_rebar_min_area(As_ek, 300)
+            if ch_il:
+                choices_il[edge] = ch_il
+                lines.append(f"    → Seçilen Ek Donatı ({edge}): {ch_il.label_with_area()}")
+        else:
+            lines.append(f"    → Pilye yeterli, ek donatı gerekmiyor.")
     lines.append("")
     
     # Y mesnet donatısı gereksinimi ve ek donatı kontrolü
@@ -351,10 +339,8 @@ def compute_twoway_report(system, sid: str, res: dict, conc: str, steel: str,
         lines.append(f"  {step}")
     lines.append(f"  Gerekli As_mesnet = {asyn:.1f} mm²/m")
     
-    # Y mesnet ek donatısı kontrolü (T/B kenarları)
+    # Y mesnet ek donatı kontrolü (T/B kenarları)
     As_pilye_y = ch_y_pilye.area_mm2_per_m
-    ch_y_il = None
-    max_As_ek_y = 0.0
     
     for edge in ["T", "B"]:
         neighbor_id, neighbor_kind = get_neighbor_on_edge_twoway(system, sid, edge)
@@ -362,7 +348,7 @@ def compute_twoway_report(system, sid: str, res: dict, conc: str, steel: str,
         if neighbor_id is None:
             # Süreksiz kenar - mesnet ek donatısı gerekmez
             lines.append(f"  {edge} kenarı: Süreksiz → Mesnet ek donatısı gerekmez")
-            continue  # Bu kenarı atla
+            continue
             
         As_pilye_komsu = 0.0
         neighbor_info = ""
@@ -379,16 +365,13 @@ def compute_twoway_report(system, sid: str, res: dict, conc: str, steel: str,
         lines.append(f"  {edge} kenarı: {neighbor_info}")
         lines.append(f"    Gerekli: {asyn:.1f} - Mevcut: (Kendi:{As_pilye_y:.1f} + Komşu:{As_pilye_komsu:.1f} = {As_mevcut:.1f}) = Fark: {asyn - As_mevcut:.1f}")
         
-        if As_ek > max_As_ek_y:
-            max_As_ek_y = As_ek
-    
-    if max_As_ek_y > 1e-6:
-        ch_y_il = select_rebar_min_area(max_As_ek_y, 300)  # Mesnet ek donatısı için smax=300
-        if ch_y_il:
-            lines.append(f"  Max As_ek = {max_As_ek_y:.1f} mm²/m → Seçilen Ek Donatı: {ch_y_il.label_with_area()}")
-            lines.append(f"  (Bu donatı gerekli olan tüm Y mesnetlerine (T/B) uygulanır.)")
-    else:
-        lines.append(f"  Pilye toplamları yeterli, ek donatı gerekmiyor")
+        if As_ek > 1e-6:
+            ch_il = select_rebar_min_area(As_ek, 300)
+            if ch_il:
+                choices_il[edge] = ch_il
+                lines.append(f"    → Seçilen Ek Donatı ({edge}): {ch_il.label_with_area()}")
+        else:
+            lines.append(f"    → Pilye yeterli, ek donatı gerekmiyor.")
     lines.append("")
 
     (Lf, Rf, Tf, Bf), _, _ = twoway_edge_continuity_full(system, sid)
@@ -402,19 +385,16 @@ def compute_twoway_report(system, sid: str, res: dict, conc: str, steel: str,
             "y_span": ch_y, 
             "y_span_duz": ch_y_duz, 
             "y_span_pilye": ch_y_pilye,
-            "x_support_extra": ch_x_il, 
-            "y_support_extra": ch_y_il
+            "support_extra": choices_il  # Store dict for all 4 edges
         },
         "edge_continuity": {
             "L": Lf, "R": Rf, "T": Tf, "B": Bf
         }
     }
-    lines.append(f"SONUÇ: X: {ch_x_duz.label()} düz + {ch_x_pilye.label()} pilye | Y: {ch_y_duz.label()} düz + {ch_y_pilye.label()} pilye")
-    if ch_x_il:
-        lines.append(f"       X Mesnet Ek: {ch_x_il.label()}")
-    if ch_y_il:
-        lines.append(f"       Y Mesnet Ek: {ch_y_il.label()}")
+    lines.append(f"SONUÇ: X: {ch_x_duz.label()} duz + {ch_x_pilye.label()} pilye | Y: {ch_y_duz.label()} duz + {ch_y_pilye.label()} pilye")
+    for edge, ch in choices_il.items():
+        if ch:
+            lines.append(f"       Ek ({edge}): {ch.label()}")
     lines.append("")
     
     return design_res, lines
-

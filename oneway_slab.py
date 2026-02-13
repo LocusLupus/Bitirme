@@ -246,7 +246,9 @@ def compute_oneway_per_slab(system, sid: str, bw_val: float) -> Tuple[dict, List
             "auto_dir": direction, "chain": chain,
             "fixed_start": fixed_start, "fixed_end": fixed_end,
             "continuous_start": continuous_start, "continuous_end": continuous_end,
-            "w": w, "Mpos_max": Mpos, "Mneg_min": min(Mneg_start, Mneg_end)
+            "w": w, "Mpos_max": Mpos, 
+            "Mneg_min": min(Mneg_start, Mneg_end),
+            "Mneg_start": Mneg_start, "Mneg_end": Mneg_end
         }, steps
 
     support_c, span_c = one_way_coefficients(n_spans)
@@ -279,18 +281,29 @@ def compute_oneway_per_slab(system, sid: str, bw_val: float) -> Tuple[dict, List
     for i in owned_span_idx:
         touching.add(i)
         touching.add(i+1)
+    # Bu döşemeye temas eden mesnetleri bul
+    touching = sorted(list(touching))
     Mneg_min = min(support_Mneg[i] for i in touching) if touching else None
+    
+    # START ve END mesnetlerini belirle (Ek donatı için)
+    # touching[0]: Zincirdeki ilk mesnet (Sol/Üst)
+    # touching[-1]: Zincirdeki son mesnet (Sağ/Alt)
+    Mneg_start = support_Mneg[touching[0]] if touching else None
+    Mneg_end = support_Mneg[touching[-1]] if touching else None
     
     # Sadece bu döşemenin kullandığı momentleri raporla
     steps.append(f"Bu döşemeye ({sid}) ait momentler:")
     for i in owned_span_idx:
         steps.append(f"  Açıklık M+ = {span_Mpos[i]:.3f} kNm/m (katsayı: 1/{1/span_c[i]:.0f})")
-    for i in sorted(touching):
+    for i in touching:
         steps.append(f"  Mesnet{i} M- = {support_Mneg[i]:.3f} kNm/m (katsayı: 1/{abs(1/support_c[i]):.0f})")
 
     return {
         "auto_dir": direction, "chain": chain,
-        "w": w, "Mpos_max": Mpos_max, "Mneg_min": Mneg_min
+        "w": w, "Mpos_max": Mpos_max, 
+        "Mneg_min": Mneg_min,
+        "Mneg_start": Mneg_start,
+        "Mneg_end": Mneg_end
     }, steps
 
 
@@ -384,10 +397,16 @@ def compute_oneway_report(system, sid: str, res: dict, conc: str, steel: str,
     lines.append(f"       (Detay: Her iki uçta kiriş içine bw={bw*100:.0f}cm giriş + bw={bw*100:.0f}cm aşağı kanca)")
     lines.append(f"    -> Pilye: {pilye.label()} (A={pilye.area_mm2_per_m:.1f} mm²/m)")
     
-    # Mesnet momenti için As hesabı (mesnet ek donatısı için kullanılacak)
-    As_mesnet_calc, ch_mesnet_from_M, st_mesnet_calc = system.design_main_rebar_from_M(
-        abs(Mneg), conc, steel, h, cover, smax, label_prefix="    ")
-    lines.append(f"\n    Mesnet Momenti için As = {As_mesnet_calc:.1f} mm²/m (M- = {abs(Mneg):.3f} kNm/m için)")
+    # Mesnet donatı ihtiyacı hesapları (START ve END için ayrı ayrı)
+    Mneg_start_val = abs(res.get("Mneg_start") or 0.0)
+    As_mes_start, _, _ = system.design_main_rebar_from_M(Mneg_start_val, conc, steel, h, cover, smax, label_prefix="")
+    
+    Mneg_end_val = abs(res.get("Mneg_end") or 0.0)
+    As_mes_end, _, _ = system.design_main_rebar_from_M(Mneg_end_val, conc, steel, h, cover, smax, label_prefix="")
+    
+    lines.append(f"\n    Mesnet Donatı Hesabı:")
+    lines.append(f"      START tarafı (M-={Mneg_start_val:.3f}): Gerekli As = {As_mes_start:.1f} mm²/m")
+    lines.append(f"      END tarafı   (M-={Mneg_end_val:.3f}): Gerekli As = {As_mes_end:.1f} mm²/m")
     
     # --- 2. DAĞITMA DONATISI ---
     # Dağıtma donatısı uzun kenara paralel atılır
@@ -463,21 +482,16 @@ def compute_oneway_report(system, sid: str, res: dict, conc: str, steel: str,
     
     lines.append("\n  === 5. SÜREKLİ UZUN KENAR: MESNET EK DONATISI (İLAVE) ===")
     lines.append(f"    (Doğrultu: Kısa kenara paralel -> {kisa_kenar_dogrultusu})")
-    As_mesnet_req = As_mesnet_calc  # Mesnet momenti için hesaplanan As kullan
     As_pilye_bu_doseme = pilye.area_mm2_per_m
     
     # Komşu döşemelerin pilye alanlarını bul (uzun kenar komşuları)
-    # auto_dir = X ise uzun kenar T/B (Top/Bottom), auto_dir = Y ise uzun kenar L/R (Left/Right)
     if auto_dir == "X":
-        # Uzun kenar T ve B kenarı, komşuları direction Y, START ve END
-        komsular_uzun_start = system.neighbor_slabs_on_side(sid, "Y", "START")  # T kenarındaki komşular
-        komsular_uzun_end = system.neighbor_slabs_on_side(sid, "Y", "END")      # B kenarındaki komşular
+        komsular_uzun_start = system.neighbor_slabs_on_side(sid, "Y", "START")
+        komsular_uzun_end = system.neighbor_slabs_on_side(sid, "Y", "END")
     else:
-        # Uzun kenar L ve R kenarı, komşuları direction X, START ve END
-        komsular_uzun_start = system.neighbor_slabs_on_side(sid, "X", "START")  # L kenarındaki komşular
-        komsular_uzun_end = system.neighbor_slabs_on_side(sid, "X", "END")      # R kenarındaki komşular
+        komsular_uzun_start = system.neighbor_slabs_on_side(sid, "X", "START")
+        komsular_uzun_end = system.neighbor_slabs_on_side(sid, "X", "END")
     
-    lines.append(f"    As_mesnet (hesaplanan) = {As_mesnet_req:.1f} mm²/m (M- = {abs(Mneg):.3f} kNm/m)")
     lines.append(f"    As_pilye (bu döşeme) = {As_pilye_bu_doseme:.1f} mm²/m")
     
     if uzun_kenar_start_surekli:
@@ -493,9 +507,10 @@ def compute_oneway_report(system, sid: str, res: dict, conc: str, steel: str,
                 lines.append(f"    Komşu {komsu_sid} pilye bilgisi yok, 0 kabul edildi")
         
         As_pilye_toplam_start = As_pilye_bu_doseme + As_pilye_komsu_start
-        As_ek_req_start = max(0, As_mesnet_req - As_pilye_toplam_start)
+        As_mesnet_req_start = As_mes_start
+        As_ek_req_start = max(0, As_mesnet_req_start - As_pilye_toplam_start)
         lines.append(f"    As_pilye (toplam: bu + komşu) = {As_pilye_bu_doseme:.1f} + {As_pilye_komsu_start:.1f} = {As_pilye_toplam_start:.1f} mm²/m")
-        lines.append(f"    As_ek = max(0, {As_mesnet_req:.1f} - {As_pilye_toplam_start:.1f}) = {As_ek_req_start:.1f} mm²/m")
+        lines.append(f"    As_ek = max(0, {As_mesnet_req_start:.1f} - {As_pilye_toplam_start:.1f}) = {As_ek_req_start:.1f} mm²/m")
         
         if As_ek_req_start > 1e-6:
             ch_mesnet_ek_start = select_rebar_min_area(As_ek_req_start, smax, phi_min=8)
@@ -519,9 +534,10 @@ def compute_oneway_report(system, sid: str, res: dict, conc: str, steel: str,
                 lines.append(f"    Komşu {komsu_sid} pilye bilgisi yok, 0 kabul edildi")
         
         As_pilye_toplam_end = As_pilye_bu_doseme + As_pilye_komsu_end
-        As_ek_req_end = max(0, As_mesnet_req - As_pilye_toplam_end)
+        As_mesnet_req_end = As_mes_end
+        As_ek_req_end = max(0, As_mesnet_req_end - As_pilye_toplam_end)
         lines.append(f"    As_pilye (toplam: bu + komşu) = {As_pilye_bu_doseme:.1f} + {As_pilye_komsu_end:.1f} = {As_pilye_toplam_end:.1f} mm²/m")
-        lines.append(f"    As_ek = max(0, {As_mesnet_req:.1f} - {As_pilye_toplam_end:.1f}) = {As_ek_req_end:.1f} mm²/m")
+        lines.append(f"    As_ek = max(0, {As_mesnet_req_end:.1f} - {As_pilye_toplam_end:.1f}) = {As_ek_req_end:.1f} mm²/m")
         
         if As_ek_req_end > 1e-6:
             ch_mesnet_ek_end = select_rebar_min_area(As_ek_req_end, smax, phi_min=8)
