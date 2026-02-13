@@ -380,7 +380,7 @@ class App(tk.Tk):
             # Döşeme modu: kenar seç ve komşu döşeme ekle
             self.selected_edge = edge
             self.redraw()
-            self.after(100, lambda: self._add_adjacent_slab_dialog(edge))
+            self.after(100, lambda: self._add_adjacent_slab_dialog(edge, (evt.x, evt.y)))
 
     # =========================================================
     # Kiriş yönetimi
@@ -447,25 +447,41 @@ class App(tk.Tk):
         self.refresh_slab_list()
         self.redraw()
 
-    def _add_adjacent_slab_dialog(self, edge_info: Tuple[str, str]):
+    def _add_adjacent_slab_dialog(self, edge_info: Tuple[str, str], click_pos: Tuple[int, int] = None):
         """Seçilen kenara komşu yeni döşeme ekle."""
         ref_sid, ref_edge = edge_info
         ref = self.real_slabs[ref_sid]
 
-        # Yeni döşemenin ortak kenar boyutu otomatik hesaplanır
+        # Varsayılan hizalamayı tıklandığı konuma göre belirle
+        default_align = "Üst" if ref_edge in ("L", "R") else "Sol"
+        if click_pos:
+            cx, cy = click_pos
+            mx, my = self.px_to_m(cx, cy)
+            if ref_edge in ("L", "R"):
+                # Dikey kenar: Ortadan aşağıdaysa "Alt", yukarıdaysa "Üst"
+                mid_y = ref.y + ref.h / 2
+                default_align = "Alt" if my > mid_y else "Üst"
+            else:
+                # Yatay kenar: Ortadan sağdaysa "Sağ", soldaysa "Sol"
+                mid_x = ref.x + ref.w / 2
+                default_align = "Sağ" if mx > mid_x else "Sol"
+
+        # Yeni döşemenin ortak kenar boyutu otomatik (sadece referans için gösterilecek)
         if ref_edge in ("L", "R"):
             shared_len = ref.h  # Ortak kenar Y yönünde
-            prompt_dim = "Lx (genişlik, m):"
-            default_dim = 4.0
+            default_lx = 4.0
+            default_ly = shared_len
+            align_options = ["Üst", "Alt"]
         else:
             shared_len = ref.w  # Ortak kenar X yönünde
-            prompt_dim = "Ly (yükseklik, m):"
-            default_dim = 4.0
+            default_lx = shared_len
+            default_ly = 4.0
+            align_options = ["Sol", "Sağ"]
 
         # Dialog
         dlg = tk.Toplevel(self)
         dlg.title("Komşu Döşeme Ekle")
-        dlg.geometry("320x280")
+        dlg.geometry("350x330")
         dlg.transient(self)
         dlg.grab_set()
 
@@ -476,30 +492,45 @@ class App(tk.Tk):
         frame = ttk.Frame(dlg)
         frame.pack(pady=10, padx=20, fill="x")
 
+        # Row 0: ID
         ttk.Label(frame, text="Döşeme ID:").grid(row=0, column=0, sticky="w", pady=3)
         sid_var = tk.StringVar()
         ttk.Entry(frame, textvariable=sid_var, width=10).grid(row=0, column=1, pady=3)
 
-        ttk.Label(frame, text=prompt_dim).grid(row=1, column=0, sticky="w", pady=3)
-        dim_var = tk.DoubleVar(value=default_dim)
-        ttk.Entry(frame, textvariable=dim_var, width=10).grid(row=1, column=1, pady=3)
+        # Row 1: Lx
+        ttk.Label(frame, text="Lx (genişlik, m):").grid(row=1, column=0, sticky="w", pady=3)
+        lx_var = tk.DoubleVar(value=default_lx)
+        ttk.Entry(frame, textvariable=lx_var, width=10).grid(row=1, column=1, pady=3)
 
+        # Row 2: Ly
+        ttk.Label(frame, text="Ly (yükseklik, m):").grid(row=2, column=0, sticky="w", pady=3)
+        ly_var = tk.DoubleVar(value=default_ly)
+        ttk.Entry(frame, textvariable=ly_var, width=10).grid(row=2, column=1, pady=3)
 
+        # Row 3: Alignment
+        ttk.Label(frame, text="Hizalama:").grid(row=3, column=0, sticky="w", pady=3)
+        align_var = tk.StringVar(value=default_align)
+        align_combo = ttk.Combobox(frame, textvariable=align_var, values=align_options, width=10, state="readonly")
+        align_combo.grid(row=3, column=1, pady=3)
 
-        ttk.Label(frame, text="Tip:").grid(row=2, column=0, sticky="w", pady=3)
+        # Row 4: Type
+        ttk.Label(frame, text="Tip:").grid(row=4, column=0, sticky="w", pady=3)
         kind_var = tk.StringVar(value=self.mode.get().replace("PLACE_", ""))
         kind_combo = ttk.Combobox(frame, textvariable=kind_var,
                                   values=["ONEWAY", "TWOWAY", "BALCONY"], width=10)
-        kind_combo.grid(row=2, column=1, pady=3)
+        kind_combo.grid(row=4, column=1, pady=3)
 
         def do_add():
             new_sid = sid_var.get().strip()
-            new_dim = dim_var.get()
+            val_lx = lx_var.get()
+            val_ly = ly_var.get()
+            align = align_var.get()
+
             if not new_sid:
                 messagebox.showerror("Hata", "ID boş olamaz!", parent=dlg)
                 return
-            if new_dim <= 0:
-                messagebox.showerror("Hata", "Boyut pozitif olmalı!", parent=dlg)
+            if val_lx <= 0 or val_ly <= 0:
+                messagebox.showerror("Hata", "Boyutlar pozitif olmalı!", parent=dlg)
                 return
 
             if new_sid in self.real_slabs:
@@ -508,22 +539,40 @@ class App(tk.Tk):
                 self._delete_real_slab(new_sid)
 
             # Yeni döşemenin konum ve boyutunu hesapla
+            nx, ny = 0.0, 0.0
+            nw, nh = val_lx, val_ly
+
             if ref_edge == "R":
-                nx, ny = ref.x + ref.w, ref.y
-                nw = new_dim if ref_edge in ("L", "R") else shared_len
-                nh = shared_len if ref_edge in ("L", "R") else new_dim
+                # Sağ kenara ekle
+                nx = ref.x + ref.w
+                if align == "Üst":
+                    ny = ref.y
+                else: # Alt
+                    ny = ref.y + ref.h - nh
+
             elif ref_edge == "L":
-                nw = new_dim
-                nh = shared_len
-                nx, ny = ref.x - nw, ref.y
+                # Sol kenara ekle
+                nx = ref.x - nw
+                if align == "Üst":
+                    ny = ref.y
+                else: # Alt
+                    ny = ref.y + ref.h - nh
+
             elif ref_edge == "B":
-                nw = shared_len
-                nh = new_dim
-                nx, ny = ref.x, ref.y + ref.h
+                # Alt kenara ekle
+                ny = ref.y + ref.h
+                if align == "Sol":
+                    nx = ref.x
+                else: # Sağ
+                    nx = ref.x + ref.w - nw
+
             elif ref_edge == "T":
-                nw = shared_len
-                nh = new_dim
-                nx, ny = ref.x, ref.y - new_dim
+                # Üst kenara ekle
+                ny = ref.y - nh
+                if align == "Sol":
+                    nx = ref.x
+                else: # Sağ
+                    nx = ref.x + ref.w - nw
             else:
                 return
 

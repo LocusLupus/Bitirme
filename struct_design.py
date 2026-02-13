@@ -210,7 +210,7 @@ def select_rebar_min_area(As_req: float, s_max: int, phi_min: int = 8, phi_max: 
             if s > s_max:
                 continue
             A = area_per_m(phi, s)
-            if A + 1e-9 >= As_req:
+            if A >= As_req - 1e-9: # Floating point tolerance, but generally strict
                 cand = RebarChoice(phi, s, A)
                 if best is None:
                     best = cand
