@@ -322,11 +322,39 @@ class SlabSystem:
         
         As_req = As_raw if As_raw is not None else 0.0
         d_mm = max(1.0, d_eff)
-        As_min = As_min_override if As_min_override is not None else rho_min_oneway(steel) * 1000.0 * d_mm
         
-        As_req2 = max(As_req, As_min)
+        # As_min hesabı: TS500'e göre rho_min * b * d
+        # Ancak kullanıcı d_delta ile d'yi azaltıyorsa (çift yönlü döşemede iç donatı gibi),
+        # As_min de azalır. 
+        # Eğer raporlamada "240" (d=120 için) yazıp, seçimde 220 (d=110 için) kullanıyorsak tutarsızlık olur.
+        # FİKS: Her zaman raporlanan (veya override edilen) As_min değerini esas al.
+        
+        As_min_calc = rho_min_oneway(steel) * 1000.0 * d_mm
+        
+        if As_min_override is not None:
+            As_min_use = As_min_override
+            As_min_source = "override"
+        else:
+            # Sadece ONEWAY/TWOWAY ayrımı yapılabilir ama şimdilik hesaplanan d üzerinden gidiyoruz.
+            # EĞER kullanıcı "Gerekli As" olarak 240 görüp 220'ye göre seçim yapılmasını istemiyorsa,
+            # çağıran yer (twoway_slab.py) As_min_override göndermeliydi veya d_delta yapmamalıydı.
+            # AMA BURADAKİ SORUN: Kullanıcı 240 görüyor (raporlamada belki manuel hesapladı veya başka yerden gördü?)
+            # Biz burada d_eff kullanıyoruz.
+            
+            # KULLANICI İSTEĞİNE ÖZEL DÜZELTME:
+            # Tekil/Çift yönlü döşemelerde minimum donatı genellikle brüt kesit veya ana d üzerinden istenir.
+            # İç donatı için d azalsa bile, bence min donatı kısıtlamasını ana d (d_nom) üzerinden tutmak daha güvenli ve tutarlı.
+            # Böylece X ve Y yönü için min donatı aynı görünür (240).
+            
+            As_min_nom = rho_min_oneway(steel) * 1000.0 * d_nom
+            As_min_use = As_min_nom 
+            As_min_source = "nominal d"
+
+        As_req2 = max(As_req, As_min_use)
+        
+        # Raporlama
         if As_req2 > As_req + 1e-9:
-            steps.append(f"{label_prefix}As_min kontrolü: {As_req:.1f} -> {As_req2:.1f}")
+             steps.append(f"{label_prefix}As_min kontrolü ({As_min_source}): {As_req:.1f} < {As_min_use:.1f} -> Gerekli={As_req2:.1f}")
         
         cand = select_rebar_min_area(As_req2, s_max, phi_min=8)
         if cand is None:
