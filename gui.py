@@ -74,7 +74,7 @@ class App(tk.Tk):
         self.h_mm = tk.DoubleVar(value=120.0)
         self.cover_mm = tk.DoubleVar(value=25.0)
 
-        self.mode = tk.StringVar(value="PLACE_ONEWAY")
+        self.mode = tk.StringVar(value="PLACE_SLAB")
         self.last_design = {}
 
         # Orantılı çizim verileri
@@ -128,8 +128,7 @@ class App(tk.Tk):
         tools = ttk.LabelFrame(top, text="Araçlar")
         tools.pack(side="left", padx=10)
         modes = [
-            ("ONEWAY", "PLACE_ONEWAY"),
-            ("TWOWAY", "PLACE_TWOWAY"),
+            ("DÖŞEME", "PLACE_SLAB"),
             ("BALCONY", "PLACE_BALCONY"),
             ("Kiriş Ekle/Sil", "BEAM"),
         ]
@@ -273,9 +272,19 @@ class App(tk.Tk):
         self.canvas.create_rectangle(x0, y0, x1, y1, fill=fill_color,
                                      outline="#333333", width=2)
 
-        # Etiket
+        # Etiket - m oranı ve yön bilgisi ile
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-        label = f"{rs.sid}\n{rs.kind}\n{rs.w:.2f}×{rs.h:.2f} m"
+        if rs.kind == "BALCONY":
+            label = f"{rs.sid}\nBALKON\n{rs.w:.2f}×{rs.h:.2f} m"
+        else:
+            Ls = min(rs.w, rs.h)
+            Ll = max(rs.w, rs.h)
+            m_ratio = Ll / Ls if Ls > 0 else 0
+            if rs.kind == "ONEWAY":
+                dir_text = "Tek Doğrultuda Çalışan"
+            else:
+                dir_text = "Çift Doğrultuda Çalışan"
+            label = f"{rs.sid}\n{rs.kind} (m={m_ratio:.2f})\n{dir_text}\n{rs.w:.2f}×{rs.h:.2f} m"
         self.canvas.create_text(cx, cy, text=label,
                                 font=("Arial", 10, "bold"), justify="center")
 
@@ -348,6 +357,22 @@ class App(tk.Tk):
             if rs.x <= mx <= rs.x + rs.w and rs.y <= my <= rs.y + rs.h:
                 return sid
         return None
+
+    def _determine_slab_kind(self, w: float, h: float) -> str:
+        """Döşeme tipini Ll/Ls oranına göre otomatik belirle.
+        
+        Ls: Kısa doğrultudaki döşeme açıklığı
+        Ll: Uzun doğrultudaki döşeme açıklığı
+        m = Ll / Ls
+        m > 2  → Tek Doğrultuda (ONEWAY)
+        m ≤ 2  → Çift Doğrultuda (TWOWAY)
+        """
+        Ls = min(w, h)
+        Ll = max(w, h)
+        if Ls <= 0:
+            return "ONEWAY"
+        m = Ll / Ls
+        return "ONEWAY" if m > 2 else "TWOWAY"
 
     # =========================================================
     # Mouse olayları
@@ -426,11 +451,10 @@ class App(tk.Tk):
                 return
             self._delete_real_slab(sid)
 
-        kind = "ONEWAY"
-        if "TWOWAY" in self.mode.get():
-            kind = "TWOWAY"
         if "BALCONY" in self.mode.get():
             kind = "BALCONY"
+        else:
+            kind = self._determine_slab_kind(w, h)
 
         # İlk döşeme ise (0,0); değilse mevcut döşemelerin sağına ekle
         if not self.real_slabs:
@@ -513,12 +537,23 @@ class App(tk.Tk):
         align_combo = ttk.Combobox(frame, textvariable=align_var, values=align_options, width=10, state="readonly")
         align_combo.grid(row=3, column=1, pady=3)
 
-        # Row 4: Type
+        # Row 4: Type (otomatik belirlenir, sadece bilgi amaçlı)
         ttk.Label(frame, text="Tip:").grid(row=4, column=0, sticky="w", pady=3)
-        kind_var = tk.StringVar(value=self.mode.get().replace("PLACE_", ""))
-        kind_combo = ttk.Combobox(frame, textvariable=kind_var,
-                                  values=["ONEWAY", "TWOWAY", "BALCONY"], width=10)
-        kind_combo.grid(row=4, column=1, pady=3)
+        auto_kind = "BALCONY" if "BALCONY" in self.mode.get() else self._determine_slab_kind(lx_var.get(), ly_var.get())
+        kind_var = tk.StringVar(value=auto_kind)
+        kind_label = ttk.Label(frame, textvariable=kind_var, font=("Arial", 9, "bold"))
+        kind_label.grid(row=4, column=1, pady=3)
+
+        def _update_kind(*args):
+            try:
+                lx = lx_var.get()
+                ly = ly_var.get()
+                if lx > 0 and ly > 0 and "BALCONY" not in self.mode.get():
+                    kind_var.set(self._determine_slab_kind(lx, ly))
+            except Exception:
+                pass
+        lx_var.trace_add("write", _update_kind)
+        ly_var.trace_add("write", _update_kind)
 
         def do_add():
             new_sid = sid_var.get().strip()
