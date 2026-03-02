@@ -1,7 +1,8 @@
 import tkinter as tk
-from tkinter import ttk, simpledialog, messagebox
+from tkinter import ttk, simpledialog, messagebox, filedialog
 import os
 import math
+import json
 from typing import Tuple, Optional, Dict
 
 from constants import CONCRETE_FCK, STEEL_FYK
@@ -18,6 +19,7 @@ from oneway_slab import compute_oneway_report
 from twoway_slab import compute_twoway_report
 from moment_balance_slab import balance_support_moments
 from balcony_slab import compute_balcony_report
+import json_loader
 
 # ---------------------------------------------------------------------------
 # Gerçek koordinat tabanlı döşeme bilgisi (metre cinsinden)
@@ -139,6 +141,7 @@ class App(tk.Tk):
         act = ttk.Frame(top)
         act.pack(side="right")
         ttk.Button(act, text="Döşeme Ekle", command=self.add_first_slab).pack(fill="x", pady=1)
+        ttk.Button(act, text="JSON'dan Yükle", command=self.load_from_json).pack(fill="x", pady=1)
         ttk.Button(act, text="Hesapla", command=self.compute_and_report).pack(fill="x", pady=1)
         ttk.Button(act, text="DXF", command=self.export_dxf_and_open).pack(fill="x", pady=1)
         ttk.Button(act, text="Temizle", command=self.reset_all).pack(fill="x", pady=1)
@@ -949,3 +952,43 @@ class App(tk.Tk):
                 pass
         except Exception as e:
             messagebox.showerror("Hata", str(e))
+
+    def load_from_json(self):
+        """JSON dosyasından döşeme planını yükler."""
+        fname = filedialog.askopenfilename(
+            title="Slab JSON Dosyası Seç",
+            filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")]
+        )
+        if not fname:
+            return
+
+        try:
+            with open(fname, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            slabs, beams = json_loader.parse_slab_json(data)
+
+            if not slabs:
+                messagebox.showwarning("Uyarı", "Dosyada geçerli döşeme verisi bulunamadı.")
+                return
+
+            # Mevcutları sorarak temizle
+            if self.real_slabs:
+                if messagebox.askyesno("Temizle", "Mevcut döşemeler temizlensin mi?"):
+                    self.real_slabs.clear()
+                    self.beam_edges.clear()
+
+            for s in slabs:
+                rs = RealSlab(
+                    s["sid"], s["x"], s["y"], s["w"], s["h"],
+                    s["kind"], s["pd"], s["b"]
+                )
+                self.real_slabs[rs.sid] = rs
+
+            self._sync_to_cell_system()
+            self.refresh_slab_list()
+            self.redraw()
+            messagebox.showinfo("Başarılı", f"{len(slabs)} döşeme yüklendi.")
+
+        except Exception as e:
+            messagebox.showerror("Hata", f"JSON yüklenirken hata oluştu:\n{e}")
