@@ -978,10 +978,21 @@ class App(tk.Tk):
                     self.real_slabs.clear()
                     self.beam_edges.clear()
 
+            # JSON'da bulunmayan parametreleri kullanıcıya sor
+            params_ok = self._ask_design_params_dialog()
+            if not params_ok:
+                # Kullanıcı iptal etti – döşemeleri yine de yükle, mevcut değerleri kullan
+                pass
+
+            # Kullanıcının dialogda girdiği Pd değerini al
+            user_pd = self.pd.get()
+
             for s in slabs:
+                # Pd: JSON'da bu alan tipik olarak yoktur (varsayılan 10.0 gelir),
+                # bu yüzden kullanıcının dialogda girdiği değer her zaman kullanılır.
                 rs = RealSlab(
                     s["sid"], s["x"], s["y"], s["w"], s["h"],
-                    s["kind"], s["pd"], s["b"]
+                    s["kind"], user_pd, s["b"]
                 )
                 self.real_slabs[rs.sid] = rs
 
@@ -992,3 +1003,98 @@ class App(tk.Tk):
 
         except Exception as e:
             messagebox.showerror("Hata", f"JSON yüklenirken hata oluştu:\n{e}")
+
+    def _ask_design_params_dialog(self) -> bool:
+        """
+        JSON'da bulunmayan tasarım parametrelerini kullanıcıya soran dialog.
+        Döndürür: True → Kullanıcı Tamam'a bastı, False → İptal etti.
+        """
+        dlg = tk.Toplevel(self)
+        dlg.title("Tasarım Parametreleri (JSON'da Bulunmayan Değerler)")
+        dlg.geometry("420x340")
+        dlg.resizable(False, False)
+        dlg.transient(self)
+        dlg.grab_set()
+
+        result = {"ok": False}
+
+        # ── Açıklama ──
+        ttk.Label(
+            dlg,
+            text="Aşağıdaki değerler JSON dosyasında yer almamaktadır.\n"
+                 "Lütfen hesapta kullanılacak değerleri giriniz.",
+            justify="center", wraplength=380
+        ).pack(pady=(12, 6))
+
+        frm = ttk.Frame(dlg)
+        frm.pack(padx=20, pady=4, fill="x")
+
+        # Geçici değişkenler (mevcut GUI değerlerini varsayılan olarak al)
+        t_h    = tk.DoubleVar(value=self.h_mm.get())
+        t_pd   = tk.DoubleVar(value=self.pd.get())
+        t_d    = tk.DoubleVar(value=self.cover_mm.get())
+        t_conc = tk.StringVar(value=self.conc.get())
+        t_steel= tk.StringVar(value=self.steel.get())
+        t_bw   = tk.DoubleVar(value=self.bw.get())
+
+        rows = [
+            ("h  – Döşeme kalınlığı (mm):",          t_h,    "entry"),
+            ("Pd – Hareketli yük (kN/m²):",           t_pd,   "entry"),
+            ("d  – Paspayı / Örtü (mm):",             t_d,    "entry"),
+            ("Beton sınıfı:",                          t_conc, "combo_conc"),
+            ("Çelik sınıfı:",                          t_steel,"combo_steel"),
+            ("bw – Kiriş genişliği (m):",             t_bw,   "entry"),
+        ]
+
+        for i, (lbl_text, var, widget_type) in enumerate(rows):
+            ttk.Label(frm, text=lbl_text, anchor="w").grid(
+                row=i, column=0, sticky="w", pady=3, padx=(0, 10))
+            if widget_type == "entry":
+                ttk.Entry(frm, textvariable=var, width=14).grid(
+                    row=i, column=1, sticky="w")
+            elif widget_type == "combo_conc":
+                ttk.Combobox(frm, textvariable=var,
+                             values=list(CONCRETE_FCK.keys()),
+                             width=12, state="readonly").grid(
+                    row=i, column=1, sticky="w")
+            elif widget_type == "combo_steel":
+                ttk.Combobox(frm, textvariable=var,
+                             values=list(STEEL_FYK.keys()),
+                             width=12, state="readonly").grid(
+                    row=i, column=1, sticky="w")
+
+        # ── Butonlar ──
+        btn_frm = ttk.Frame(dlg)
+        btn_frm.pack(pady=14)
+
+        def on_ok():
+            try:
+                h_val   = t_h.get()
+                pd_val  = t_pd.get()
+                d_val   = t_d.get()
+                bw_val  = t_bw.get()
+                if h_val <= 0 or pd_val < 0 or d_val < 0 or bw_val <= 0:
+                    messagebox.showerror("Hata",
+                        "h ve bw pozitif, Pd ve paspayı sıfır veya pozitif olmalıdır.",
+                        parent=dlg)
+                    return
+                # Değerleri GUI değişkenlerine aktar
+                self.h_mm.set(h_val)
+                self.pd.set(pd_val)
+                self.cover_mm.set(d_val)
+                self.conc.set(t_conc.get())
+                self.steel.set(t_steel.get())
+                self.bw.set(bw_val)
+                result["ok"] = True
+                dlg.destroy()
+            except Exception as exc:
+                messagebox.showerror("Hata", str(exc), parent=dlg)
+
+        def on_cancel():
+            dlg.destroy()
+
+        ttk.Button(btn_frm, text="Tamam",  command=on_ok,    width=12).pack(side="left", padx=8)
+        ttk.Button(btn_frm, text="İptal", command=on_cancel, width=12).pack(side="left", padx=8)
+
+        dlg.wait_window()
+        return result["ok"]
