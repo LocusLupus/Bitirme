@@ -155,6 +155,61 @@ def _parse_cell_types_format(json_data: Dict[str, Any]):
                 "pd":   cell_info.get("pd", 10.0),
                 "b":    cell_info.get("b", 1.0),
             })
+    x_lines_px = axes.get("x_lines_px", [])
+    y_lines_px = axes.get("y_lines_px", [])
+
+    def closest_line_index(px, lines):
+        if not lines: return -1
+        return min(range(len(lines)), key=lambda i: abs(lines[i] - px))
+
+    balconies = json_data.get("balconies", [])
+    for b_data in balconies:
+        b_id = b_data.get("id", f"BL_{slab_counter}")
+        slab_counter += 1
+        edge_type = b_data.get("edge")
+        bbox = b_data.get("bbox_px")
+        
+        if edge_type in ("left", "right"):
+            w_m = b_data.get("depth_cm", 0) / 100.0
+            h_m = b_data.get("width_cm", 0) / 100.0
+        else:
+            w_m = b_data.get("width_cm", 0) / 100.0
+            h_m = b_data.get("depth_cm", 0) / 100.0
+            
+        if w_m <= 0 or h_m <= 0 or not bbox or not x_lines_px or not y_lines_px:
+            continue
+            
+        xmin, ymin, xmax, ymax = bbox
+        
+        if edge_type in ("top", "bottom"):
+            xi = closest_line_index(xmin, x_lines_px)
+            x_m = x_coords[xi] if xi >= 0 and xi < len(x_coords) else 0.0
+            if edge_type == "top":
+                yi = closest_line_index(ymax, y_lines_px)
+                y_m = y_coords[yi] - h_m if yi >= 0 and yi < len(y_coords) else 0.0
+            else:
+                yi = closest_line_index(ymin, y_lines_px)
+                y_m = y_coords[yi] if yi >= 0 and yi < len(y_coords) else 0.0
+        else:
+            yi = closest_line_index(ymin, y_lines_px)
+            y_m = y_coords[yi] if yi >= 0 and yi < len(y_coords) else 0.0
+            if edge_type == "left":
+                xi = closest_line_index(xmax, x_lines_px)
+                x_m = x_coords[xi] - w_m if xi >= 0 and xi < len(x_coords) else 0.0
+            else:
+                xi = closest_line_index(xmin, x_lines_px)
+                x_m = x_coords[xi] if xi >= 0 and xi < len(x_coords) else 0.0
+                
+        slab_list.append({
+            "sid": b_id,
+            "x": round(x_m, 6),
+            "y": round(y_m, 6),
+            "w": round(w_m, 6),
+            "h": round(h_m, 6),
+            "kind": "BALCONY",
+            "pd": b_data.get("pd", 5.0), # balkona özel varsayılan hareketli yük
+            "b": b_data.get("b", 1.0)
+        })
 
     return slab_list, set()
 
