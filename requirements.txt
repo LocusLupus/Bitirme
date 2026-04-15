@@ -1,1 +1,5 @@
 ezdxf
+ultralytics
+easyocr
+opencv-python
+numpy

@@ -20,6 +20,7 @@ from twoway_slab import compute_twoway_report
 from moment_balance_slab import balance_support_moments
 from balcony_slab import compute_balcony_report
 import json_loader
+from pipeline import process_image_to_slabs
 
 # ---------------------------------------------------------------------------
 # Gerçek koordinat tabanlı döşeme bilgisi (metre cinsinden)
@@ -140,7 +141,7 @@ class App(tk.Tk):
 
         act = ttk.Frame(top)
         act.pack(side="right")
-        ttk.Button(act, text="Döşeme Ekle", command=self.add_first_slab).pack(fill="x", pady=1)
+        ttk.Button(act, text="Görselden Yükle (AI)", command=self.load_from_image_ai, style="Accent.TButton").pack(fill="x", pady=1)
         ttk.Button(act, text="JSON'dan Yükle", command=self.load_from_json).pack(fill="x", pady=1)
         ttk.Button(act, text="Hesapla", command=self.compute_and_report).pack(fill="x", pady=1)
         ttk.Button(act, text="DXF", command=self.export_dxf_and_open).pack(fill="x", pady=1)
@@ -952,6 +953,58 @@ class App(tk.Tk):
                 pass
         except Exception as e:
             messagebox.showerror("Hata", str(e))
+
+    def load_from_image_ai(self):
+        """Kalıp planı fotağrafından AI ile otomatik modelleme yapar."""
+        fpath = filedialog.askopenfilename(
+            title="Kalıp Planı Görseli Seçin",
+            filetypes=[("Görsel Dosyaları", "*.jpg *.jpeg *.png *.bmp")]
+        )
+        if not fpath:
+            return
+
+        # Yükleme göstergesi (geçici çözüm - status bar eklenebilir)
+        self.output.delete("1.0", "end")
+        self.output.insert("end", "YOLO ve OCR Pipeline çalışıyor, lütfen bekleyin...\n")
+        self.update()
+
+        slab_data_list, beam_edges, debug_img = process_image_to_slabs(fpath)
+
+        if slab_data_list is None:
+            messagebox.showerror("Hata", "Görsel işlenirken bir sorun oluştu.")
+            return
+
+        # Mevcut veriyi temizle
+        self.real_slabs.clear()
+        self.beam_edges.clear()
+
+        # Gelen veriyi yükle
+        for s_dict in slab_data_list:
+            sid = s_dict["sid"]
+            rs = RealSlab(
+                sid=sid,
+                x=s_dict["x"],
+                y=s_dict["y"],
+                w=s_dict["w"],
+                h=s_dict["h"],
+                kind=s_dict["kind"],
+                pd=s_dict.get("pd", 10.0),
+                b=s_dict.get("b", 1.0)
+            )
+            self.real_slabs[sid] = rs
+
+        if beam_edges:
+            self.beam_edges = set(beam_edges)
+
+        # Otomatik senkronizasyon ve hesaplama
+        self._sync_to_cell_system()
+        self.refresh_slab_list()
+        
+        # Kullanıcıyı yormadan doğrudan hesapla ve sonuçları göster
+        self.compute_and_report()
+        self.redraw()
+        
+        messagebox.showinfo("Başarılı", f"Analiz tamamlandı. {len(slab_data_list)} döşeme tespit edildi.")
 
     def load_from_json(self):
         """JSON dosyasından döşeme planını yükler."""
