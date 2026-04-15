@@ -996,6 +996,10 @@ class App(tk.Tk):
                 )
                 self.real_slabs[rs.sid] = rs
 
+            # Kirişleri ekle
+            for b in beams:
+                self.beam_edges.add(b)
+
             self._sync_to_cell_system()
             self.refresh_slab_list()
             self.redraw()

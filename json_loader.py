@@ -85,11 +85,6 @@ def _parse_cell_types_format(json_data: Dict[str, Any]):
     x_spans_m = [s * to_m for s in x_spans]
     y_spans_m = [s * to_m for s in y_spans]
 
-    # ── Kümülatif koordinatlar (m) ──
-    # x_coords[i] = i. aksın X konumu (metre)
-    x_coords = _cumulative([0.0], x_spans_m)
-    y_coords = _cumulative([0.0], y_spans_m)
-
     # ── Etiket → indeks haritaları ──
     x_idx = {lbl: i for i, lbl in enumerate(x_labels)}
     y_idx = {lbl: i for i, lbl in enumerate(y_labels)}
@@ -97,56 +92,122 @@ def _parse_cell_types_format(json_data: Dict[str, Any]):
     # ── Notlardan varsayılan kind ──
     notes = json_data.get("notes", {})
     kind_default_raw = notes.get("kind_default", "TWOWAY")
-    # "TWOWAY (change by rules if needed)" gibi ifadedeki ilk kelimeyi al
     kind_default = kind_default_raw.split()[0].upper()
+
+    cell_types_rows = json_data.get("cell_types", [])
+
+    # ── Aks Snapping (Boşlukları Kapatma) ──
+    # Döşeme içermeyen ve dar olan aks aralıklarını 0 kabul ederek döşemeleri bitiştiririz.
+    SNAP_THRESHOLD = 0.60  # 60cm altındaki boşlukları kapat
+    x_occupied = [False] * len(x_spans_m)
+    y_occupied = [False] * len(y_spans_m)
+
+    # Önce hangi aks aralıklarında döşeme olduğunu bul
+    for row in cell_types_rows:
+        for cell_info in row:
+            if cell_info.get("type", "").lower() == "slab":
+                parsed = _parse_cell_name(cell_info.get("cell", ""))
+                if parsed:
+                    xi0_lbl, yi0_lbl, xi1_lbl, yi1_lbl = parsed
+                    ix0, ix1 = x_idx.get(xi0_lbl), x_idx.get(xi1_lbl)
+                    iy0, iy1 = y_idx.get(yi0_lbl), y_idx.get(yi1_lbl)
+                    if ix0 is not None and ix1 is not None:
+                        for i in range(ix0, ix1): x_occupied[i] = True
+                    if iy0 is not None and iy1 is not None:
+                        for j in range(iy0, iy1): y_occupied[j] = True
+
+    # Boş aks aralıklarını daraltılmış yeni listeler
+    collapsed_x_spans = []
+    for i, s_m in enumerate(x_spans_m):
+        if not x_occupied[i] and s_m < SNAP_THRESHOLD:
+            collapsed_x_spans.append(0.0)
+        else:
+            collapsed_x_spans.append(s_m)
+
+    collapsed_y_spans = []
+    for j, s_m in enumerate(y_spans_m):
+        if not y_occupied[j] and s_m < SNAP_THRESHOLD:
+            collapsed_y_spans.append(0.0)
+        else:
+            collapsed_y_spans.append(s_m)
+
+    # Yeni kümülatif koordinatlar
+    x_coords = _cumulative([0.0], collapsed_x_spans)
+    y_coords = _cumulative([0.0], collapsed_y_spans)
+
+    # Kiriş çizgilerini belirle (daraltılan kısımlar aslında kiriştir)
+    beam_edges_set = set()
+    
+    # X daraltmaları için dikey kiriş parçaları
+    for i, s_m in enumerate(x_spans_m):
+        if not x_occupied[i] and s_m < SNAP_THRESHOLD:
+            x_val = round(x_coords[i], 4)
+            for j in range(len(y_spans_m)):
+                # Bu hücrenin sağında veya solunda en az bir yapısal eleman (döşeme/boşluk vb.) varsa kiriş çiz
+                has_structural_adjacent = False
+                # Solundaki sütun (i-1)
+                if i > 0 and cell_types_rows[j][i-1].get("type", "").lower() not in ("", "void"):
+                    has_structural_adjacent = True
+                # Sağındaki sütun (i+1)
+                if i < len(x_spans_m) - 1 and cell_types_rows[j][i+1].get("type", "").lower() not in ("", "void"):
+                    has_structural_adjacent = True
+                
+                if has_structural_adjacent:
+                    y0, y1 = round(y_coords[j], 4), round(y_coords[j+1], 4)
+                    if y1 > y0:
+                        beam_edges_set.add((x_val, y0, x_val, y1))
+
+    # Y daraltmaları için yatay kiriş parçaları
+    for j, s_m in enumerate(y_spans_m):
+        if not y_occupied[j] and s_m < SNAP_THRESHOLD:
+            y_val = round(y_coords[j], 4)
+            for i in range(len(x_spans_m)):
+                # Bu hücrenin üstünde veya altında en az bir yapısal eleman varsa kiriş çiz
+                has_structural_adjacent = False
+                # Üstündeki satır (j-1)
+                if j > 0 and cell_types_rows[j-1][i].get("type", "").lower() not in ("", "void"):
+                    has_structural_adjacent = True
+                # Altındaki satır (j+1)
+                if j < len(y_spans_m) - 1 and cell_types_rows[j+1][i].get("type", "").lower() not in ("", "void"):
+                    has_structural_adjacent = True
+                
+                if has_structural_adjacent:
+                    x0, x1 = round(x_coords[i], 4), round(x_coords[i+1], 4)
+                    if x1 > x0:
+                        beam_edges_set.add((x0, y_val, x1, y_val))
 
     slab_list: List[Dict[str, Any]] = []
     slab_counter = 0
-
-    cell_types_rows = json_data.get("cell_types", [])
 
     for row in cell_types_rows:
         for cell_info in row:
             cell_name = cell_info.get("cell", "")
             cell_type = cell_info.get("type", "").lower()
-
-            # Sadece "slab" tipindeki hücreleri döşeme olarak al
             if cell_type != "slab":
                 continue
 
-            # Hücre adını çözümle: "1A-2B" → x_start=1, y_start=A, x_end=2, y_end=B
             parsed = _parse_cell_name(cell_name)
             if parsed is None:
                 continue
 
             x_start_lbl, y_start_lbl, x_end_lbl, y_end_lbl = parsed
-
-            # Etiketlerin indekslerini bul
-            xi0 = x_idx.get(x_start_lbl)
-            yi0 = y_idx.get(y_start_lbl)
-            xi1 = x_idx.get(x_end_lbl)
-            yi1 = y_idx.get(y_end_lbl)
+            xi0, yi0 = x_idx.get(x_start_lbl), y_idx.get(y_start_lbl)
+            xi1, yi1 = x_idx.get(x_end_lbl), y_idx.get(y_end_lbl)
 
             if any(v is None for v in (xi0, yi0, xi1, yi1)):
                 continue
 
-            # Koordinatlar (m)
-            x = x_coords[xi0]
-            y = y_coords[yi0]
+            x, y = x_coords[xi0], y_coords[yi0]
             w = x_coords[xi1] - x_coords[xi0]
             h = y_coords[yi1] - y_coords[yi0]
 
             if w <= 0 or h <= 0:
                 continue
 
-            # Döşeme tipi – varsayılan TWOWAY, m > 2 ise ONEWAY
             kind = _determine_kind(w, h, kind_default)
-
             slab_counter += 1
-            sid = cell_name  # Hücre adını ID olarak kullan (ör: "4A-5B")
-
             slab_list.append({
-                "sid":  sid,
+                "sid":  cell_name,
                 "x":    round(x, 6),
                 "y":    round(y, 6),
                 "w":    round(w, 6),
@@ -155,9 +216,10 @@ def _parse_cell_types_format(json_data: Dict[str, Any]):
                 "pd":   cell_info.get("pd", 10.0),
                 "b":    cell_info.get("b", 1.0),
             })
+
+    # Balconies snapping logic
     x_lines_px = axes.get("x_lines_px", [])
     y_lines_px = axes.get("y_lines_px", [])
-
     def closest_line_index(px, lines):
         if not lines: return -1
         return min(range(len(lines)), key=lambda i: abs(lines[i] - px))
@@ -170,48 +232,40 @@ def _parse_cell_types_format(json_data: Dict[str, Any]):
         bbox = b_data.get("bbox_px")
         
         if edge_type in ("left", "right"):
-            w_m = b_data.get("depth_cm", 0) / 100.0
-            h_m = b_data.get("width_cm", 0) / 100.0
+            w_m, h_m = b_data.get("depth_cm", 0) / 100.0, b_data.get("width_cm", 0) / 100.0
         else:
-            w_m = b_data.get("width_cm", 0) / 100.0
-            h_m = b_data.get("depth_cm", 0) / 100.0
+            w_m, h_m = b_data.get("width_cm", 0) / 100.0, b_data.get("depth_cm", 0) / 100.0
             
         if w_m <= 0 or h_m <= 0 or not bbox or not x_lines_px or not y_lines_px:
             continue
             
         xmin, ymin, xmax, ymax = bbox
-        
         if edge_type in ("top", "bottom"):
             xi = closest_line_index(xmin, x_lines_px)
-            x_m = x_coords[xi] if xi >= 0 and xi < len(x_coords) else 0.0
+            x_m = x_coords[xi] if 0 <= xi < len(x_coords) else 0.0
             if edge_type == "top":
                 yi = closest_line_index(ymax, y_lines_px)
-                y_m = y_coords[yi] - h_m if yi >= 0 and yi < len(y_coords) else 0.0
+                y_m = (y_coords[yi] - h_m) if 0 <= yi < len(y_coords) else 0.0
             else:
                 yi = closest_line_index(ymin, y_lines_px)
-                y_m = y_coords[yi] if yi >= 0 and yi < len(y_coords) else 0.0
+                y_m = y_coords[yi] if 0 <= yi < len(y_coords) else 0.0
         else:
             yi = closest_line_index(ymin, y_lines_px)
-            y_m = y_coords[yi] if yi >= 0 and yi < len(y_coords) else 0.0
+            y_m = y_coords[yi] if 0 <= yi < len(y_coords) else 0.0
             if edge_type == "left":
                 xi = closest_line_index(xmax, x_lines_px)
-                x_m = x_coords[xi] - w_m if xi >= 0 and xi < len(x_coords) else 0.0
+                x_m = (x_coords[xi] - w_m) if 0 <= xi < len(x_coords) else 0.0
             else:
                 xi = closest_line_index(xmin, x_lines_px)
-                x_m = x_coords[xi] if xi >= 0 and xi < len(x_coords) else 0.0
+                x_m = x_coords[xi] if 0 <= xi < len(x_coords) else 0.0
                 
         slab_list.append({
-            "sid": b_id,
-            "x": round(x_m, 6),
-            "y": round(y_m, 6),
-            "w": round(w_m, 6),
-            "h": round(h_m, 6),
-            "kind": "BALCONY",
-            "pd": b_data.get("pd", 5.0), # balkona özel varsayılan hareketli yük
-            "b": b_data.get("b", 1.0)
+            "sid": b_id, "x": round(x_m, 6), "y": round(y_m, 6),
+            "w": round(w_m, 6), "h": round(h_m, 6), "kind": "BALCONY",
+            "pd": b_data.get("pd", 5.0), "b": b_data.get("b", 1.0)
         })
 
-    return slab_list, set()
+    return slab_list, beam_edges_set
 
 
 def _get_spans(axes: dict, axis: str, n_labels: int) -> List[float]:
