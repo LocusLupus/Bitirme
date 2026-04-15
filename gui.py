@@ -94,8 +94,12 @@ class App(tk.Tk):
         self.new_slab_width = tk.DoubleVar(value=4.0)
         self.new_slab_height = tk.DoubleVar(value=5.0)
 
+        # AI Analiz dosyası takibi
+        self.debug_img_path = None
+
         self._build_ui()
-        self.redraw()
+        # Uygulama açıldığında canvas'ın hazır olması için biraz bekleyip çiz
+        self.after(100, self.redraw)
 
     def _build_ui(self):
         top = ttk.Frame(self)
@@ -139,13 +143,22 @@ class App(tk.Tk):
             ttk.Radiobutton(tools, text=txt, variable=self.mode, value=val).grid(
                 row=0, column=i, sticky="w", padx=4)
 
-        act = ttk.Frame(top)
-        act.pack(side="right")
-        ttk.Button(act, text="Görselden Yükle (AI)", command=self.load_from_image_ai, style="Accent.TButton").pack(fill="x", pady=1)
-        ttk.Button(act, text="JSON'dan Yükle", command=self.load_from_json).pack(fill="x", pady=1)
-        ttk.Button(act, text="Hesapla", command=self.compute_and_report).pack(fill="x", pady=1)
-        ttk.Button(act, text="DXF", command=self.export_dxf_and_open).pack(fill="x", pady=1)
-        ttk.Button(act, text="Temizle", command=self.reset_all).pack(fill="x", pady=1)
+        act = ttk.LabelFrame(top, text="İşlem Adımları")
+        act.pack(side="right", padx=10)
+        
+        # Stil tanımları
+        style = ttk.Style()
+        style.configure("Accent.TButton", font=("Arial", 9, "bold"))
+        
+        ttk.Button(act, text="1. Görselden Yükle (AI)", command=self.load_from_image_ai, style="Accent.TButton").grid(row=0, column=0, padx=2, pady=1)
+        ttk.Button(act, text="1. JSON'dan Yükle", command=self.load_from_json).grid(row=0, column=1, padx=2, pady=1)
+        ttk.Button(act, text="2. Hesapla", command=self.compute_and_report).grid(row=0, column=2, padx=2, pady=1)
+        ttk.Button(act, text="3. DXF Al", command=self.export_dxf_and_open).grid(row=1, column=0, padx=2, pady=1)
+        ttk.Button(act, text="Temizle", command=self.reset_all).grid(row=1, column=1, padx=2, pady=1)
+
+        # AI Görselini Göster Butonu (Başlangıçta gizli veya pasif)
+        self.btn_view_ai = ttk.Button(top, text="Analiz Görselini Gör", command=self.view_ai_image, state="disabled")
+        self.btn_view_ai.pack(side="right", padx=5)
 
         # Main Area
         mid = ttk.Frame(self)
@@ -804,9 +817,17 @@ class App(tk.Tk):
         self.output.delete("1.0", "end")
         conc = self.conc.get(); steel = self.steel.get()
         h = self.h_mm.get(); cover = self.cover_mm.get()
+        pd = self.pd.get()
+        b_width = self.b_width.get()
         bw = self.bw.get()
 
-        self.output.insert("end", f"Hesap Raporu\nBeton: {conc}, Çelik: {steel}, h={h}mm, cover={cover}mm\n\n")
+        # TÜM DÖŞEMELERİ EN GÜNCEL GUI DEĞERLERİYLE GÜNCELLE
+        for sid, s in self.system.slabs.items():
+            s.pd = pd
+            s.b = b_width
+            # Not: h ve cover değerleri direkt fonksiyonlara parametre olarak gönderiliyor.
+
+        self.output.insert("end", f"Hesap Raporu\nBeton: {conc}, Çelik: {steel}, h={h}mm, cover={cover}mm, Pd={pd}kN/m2\n\n")
         self.last_design = {}
 
         # ==== İKİ GEÇİŞLİ HESAPLAMA ====
@@ -996,15 +1017,27 @@ class App(tk.Tk):
         if beam_edges:
             self.beam_edges = set(beam_edges)
 
-        # Otomatik senkronizasyon ve hesaplama
+        # Otomatik senkronizasyon (Geometriyi hazırlatır)
         self._sync_to_cell_system()
         self.refresh_slab_list()
         
-        # Kullanıcıyı yormadan doğrudan hesapla ve sonuçları göster
-        self.compute_and_report()
+        # Analiz görselini sakla ve butonu aktif et
+        if debug_img:
+            self.debug_img_path = debug_img
+            self.btn_view_ai.config(state="normal")
+            
         self.redraw()
-        
-        messagebox.showinfo("Başarılı", f"Analiz tamamlandı. {len(slab_data_list)} döşeme tespit edildi.")
+        messagebox.showinfo("Başarılı", f"Analiz tamamlandı. {len(slab_data_list)} döşeme tespit edildi.\n\nŞimdi parametreleri kontrol edip 'Hesapla' butonuna basabilirsiniz.")
+
+    def view_ai_image(self):
+        """YOLO kutucuklarının olduğu analiz görselini açar."""
+        if self.debug_img_path and os.path.exists(self.debug_img_path):
+            try:
+                os.startfile(os.path.abspath(self.debug_img_path))
+            except:
+                messagebox.showerror("Hata", "Görsel görüntüleyici açılamadı.")
+        else:
+            messagebox.showwarning("Uyarı", "Analiz görseli bulunamadı.")
 
     def load_from_json(self):
         """JSON dosyasından döşeme planını yükler."""
@@ -1056,7 +1089,7 @@ class App(tk.Tk):
             self._sync_to_cell_system()
             self.refresh_slab_list()
             self.redraw()
-            messagebox.showinfo("Başarılı", f"{len(slabs)} döşeme yüklendi.")
+            messagebox.showinfo("Başarılı", f"{len(slabs)} döşeme yüklendi.\n\nŞimdi parametreleri kontrol edip 'Hesapla' butonuna basabilirsiniz.")
 
         except Exception as e:
             messagebox.showerror("Hata", f"JSON yüklenirken hata oluştu:\n{e}")
