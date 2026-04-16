@@ -28,7 +28,7 @@ from pipeline import process_image_to_slabs
 class RealSlab:
     """Metre cinsinden gerçek koordinatlarla döşeme."""
     def __init__(self, sid: str, x: float, y: float, w: float, h: float,
-                 kind: str, pd: float, b: float):
+                 kind: str, pd: float, b: float, fixed_edge: str = None):
         self.sid = sid
         self.x = x      # sol üst köşe X (metre)
         self.y = y      # sol üst köşe Y (metre)
@@ -37,6 +37,7 @@ class RealSlab:
         self.kind = kind
         self.pd = pd
         self.b = b
+        self.fixed_edge = fixed_edge
 
     def edges(self):
         """L, R, T, B kenarlarının (x0,y0,x1,y1) koordinatları."""
@@ -494,7 +495,8 @@ class App(tk.Tk):
             x = max_x
             y = 0.0
 
-        rs = RealSlab(sid, x, y, w, h, kind, self.pd.get(), self.b_width.get())
+        rs = RealSlab(sid, x, y, w, h, kind, self.pd.get(), self.b_width.get(), 
+                      fixed_edge="B" if kind == "BALCONY" else None)
         self.real_slabs[sid] = rs
         self._sync_to_cell_system()
         self.refresh_slab_list()
@@ -647,7 +649,8 @@ class App(tk.Tk):
                     return
 
             rs = RealSlab(new_sid, nx, ny, nw, nh, kind_var.get(),
-                          self.pd.get(), self.b_width.get())
+                          self.pd.get(), self.b_width.get(),
+                          fixed_edge=self._fixed_edge_from_ref(ref_edge) if kind_var.get() == "BALCONY" else None)
             self.real_slabs[new_sid] = rs
             self.selected_edge = None
             self._sync_to_cell_system()
@@ -656,6 +659,11 @@ class App(tk.Tk):
             dlg.destroy()
 
         ttk.Button(dlg, text="Ekle", command=do_add).pack(pady=10)
+
+    def _fixed_edge_from_ref(self, ref_edge: str) -> str:
+        """Referans kenara göre balkonun hangi kenarının ankastre olduğunu döner."""
+        mapping = {"L": "R", "R": "L", "T": "B", "B": "T"}
+        return mapping.get(ref_edge, "B")
 
     def _rects_overlap(self, x1, y1, w1, h1, x2, y2, w2, h2) -> bool:
         """İki dikdörtgenin çakışıp çakışmadığını kontrol et (kenar teması hariç)."""
@@ -717,7 +725,7 @@ class App(tk.Tk):
             auto_dx = rs.w / nx_cells
             auto_dy = rs.h / ny_cells
 
-            s = Slab(sid, i0, j0, i1, j1, rs.kind, auto_dx, auto_dy, rs.pd, rs.b)
+            s = Slab(sid, i0, j0, i1, j1, rs.kind, auto_dx, auto_dy, rs.pd, rs.b, rs.fixed_edge)
             self.system.add_slab(s)
 
         # Komşu döşemeler arasındaki ortak kenarları kiriş olarak işaretle
@@ -1119,7 +1127,8 @@ class App(tk.Tk):
                 h=s_dict["h"],
                 kind=s_dict["kind"],
                 pd=s_dict.get("pd", 10.0),
-                b=s_dict.get("b", 1.0)
+                b=s_dict.get("b", 1.0),
+                fixed_edge=s_dict.get("fixed_edge")
             )
             self.real_slabs[sid] = rs
 
@@ -1187,7 +1196,8 @@ class App(tk.Tk):
                 # bu yüzden kullanıcının dialogda girdiği değer her zaman kullanılır.
                 rs = RealSlab(
                     s["sid"], s["x"], s["y"], s["w"], s["h"],
-                    s["kind"], user_pd, s["b"]
+                    s["kind"], user_pd, s["b"],
+                    fixed_edge=s.get("fixed_edge")
                 )
                 self.real_slabs[rs.sid] = rs
 
