@@ -967,13 +967,98 @@ class App(tk.Tk):
         try:
             export_to_dxf(self.system, fname, self.last_design, self.bw.get(),
                           real_slabs=self.real_slabs)
-            messagebox.showinfo("OK", f"Kaydedildi: {fname}")
-            try:
-                os.startfile(os.path.abspath(fname))
-            except:
-                pass
+
+            # DXF → PDF otomatik dönüşüm (ezdxf matplotlib backend)
+            pdf_path = self._dxf_to_pdf(fname)
+
+            abs_dxf = os.path.abspath(fname)
+            abs_pdf = os.path.abspath(pdf_path) if pdf_path else None
+
+            if pdf_path:
+                msg = f"Donatı planı PDF olarak kaydedildi:\n{abs_pdf}"
+            else:
+                msg = f"DXF kaydedildi: {abs_dxf}\n(PDF dönüşümü başarısız)"
+
+            # AutoCAD'de açmak ister misiniz?
+            open_in_autocad = messagebox.askyesno(
+                "Kayıt Başarılı",
+                msg + "\n\nDosyayı AutoCAD'de de açmak ister misiniz?",
+                parent=self
+            )
+
+            # Önce PDF'i aç (varsa)
+            if pdf_path:
+                try:
+                    os.startfile(abs_pdf)
+                except Exception:
+                    pass
+
+            # Kullanıcı istedi ise AutoCAD'de (veya .dxf ile ilişkili program) aç
+            if open_in_autocad:
+                try:
+                    os.startfile(abs_dxf)
+                except Exception:
+                    messagebox.showwarning(
+                        "AutoCAD Açılamadı",
+                        f"DXF dosyası otomatik açılamadı.\nLütfen manuel olarak açın:\n{abs_dxf}",
+                        parent=self
+                    )
+
         except Exception as e:
             messagebox.showerror("Hata", str(e))
+
+    def _dxf_to_pdf(self, dxf_path: str) -> str:
+        """
+        Verilen DXF dosyasını PDF'e dönüştürür.
+        ezdxf'in matplotlib backend'ini kullanır.
+        Başarılı olursa PDF dosya yolunu, hata durumunda None döndürür.
+        """
+        try:
+            import matplotlib
+            # Tkinter ile aynı anda çalışırken çakışmayı önlemek için:
+            # Eğer backend henüz TkAgg olarak ayarlanmamışsa Agg kullan,
+            # Zaten TkAgg ise de plt.switch_backend ile Agg'e geçiyoruz.
+            import matplotlib.pyplot as plt
+            plt.switch_backend("Agg")
+            import ezdxf
+            from ezdxf.addons.drawing import RenderContext, Frontend
+            from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+
+            pdf_path = os.path.splitext(dxf_path)[0] + ".pdf"
+
+            doc = ezdxf.readfile(dxf_path)
+            msp = doc.modelspace()
+
+            # Çizim sınırlarını hesapla (otomatik ölçekleme için)
+            ctx = RenderContext(doc)
+
+            fig = plt.figure(figsize=(29.7 / 2.54, 21.0 / 2.54), dpi=150)  # A4 yatay
+            ax = fig.add_axes([0.02, 0.02, 0.96, 0.96])
+            ax.set_aspect("equal")
+            ax.axis("off")
+
+            # Siyah arka plan kullan: AutoCAD'de renk 7 (SLAB_EDGE/BEAM) beyaz olarak
+            # çizilir; beyaz zeminde görünmez olur. Siyah zeminde tüm renkler görünür.
+            BG = "#1e1e1e"  # koyu gri (saf siyah yerine göze daha rahat)
+            fig.patch.set_facecolor(BG)
+            ax.set_facecolor(BG)
+
+            out = MatplotlibBackend(ax)
+            Frontend(ctx, out).draw_layout(msp, finalize=True)
+
+            fig.savefig(pdf_path, dpi=150, bbox_inches="tight",
+                        facecolor=BG, edgecolor="none")
+            plt.close(fig)
+            return pdf_path
+
+        except ImportError as e:
+            # matplotlib veya ezdxf[draw] yüklü değil
+            self.output.insert("end", f"PDF dönüşümü için eksik paket: {e}\n"
+                                      "Yüklemek için: pip install ezdxf[draw] matplotlib\n")
+            return None
+        except Exception as e:
+            self.output.insert("end", f"PDF dönüşümü hatası: {e}\n")
+            return None
 
     def load_from_image_ai(self):
         """Kalıp planı fotağrafından AI ile otomatik modelleme yapar."""
