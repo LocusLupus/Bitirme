@@ -30,7 +30,6 @@ class Slab:
     dy: float
     pd: float
     b: float
-    fixed_edge: Optional[str] = None # For balconies
 
     def bbox(self):
         return self.i0, self.j0, self.i1, self.j1
