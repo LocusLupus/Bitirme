@@ -4,13 +4,13 @@ from infer_to_calc_inputs import main_flow
 # Bitirme kodundaki json okuyucu
 from json_loader import parse_slab_json
 
-def process_image_to_slabs(image_path, model_weights_path="best.pt"):
+def process_image_to_slabs(image_path, model_weights_path="best.pt", conf=0.35):
     """
     1. Görseli alır, YOLO+OCR pipeline'ına sokar.
     2. Çıkan JSON dict'i doğrudan json_loader'a besler.
     3. Döşeme listesini ve kiriş sınırlarını döndürür.
     """
-    print(f"YOLO ve OCR Pipeline başlatılıyor: {image_path}")
+    print(f"YOLO ve OCR Pipeline başlatılıyor: {image_path} (conf={conf})")
     
     out_prefix = os.path.splitext(image_path)[0] + "_pipeline"
     
@@ -21,7 +21,7 @@ def process_image_to_slabs(image_path, model_weights_path="best.pt"):
         "out_prefix": out_prefix,
         "dx_cm": 10,
         "imgsz": 1024,
-        "conf": 0.35,
+        "conf": conf,
         "classes_json": ""
     }
 

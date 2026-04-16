@@ -1,4 +1,4 @@
-﻿import math
+import math
 import ezdxf
 from typing import List, Tuple, Optional
 from slab_model import SlabSystem, Slab
@@ -45,7 +45,7 @@ class _DXFWriter:
         new_pts = [(x, self._fy(y)) for x, y in pts]
         self.msp.add_lwpolyline(new_pts, dxfattribs={'layer': layer}, close=closed)
 
-    def add_text(self, x, y, text, height=200.0, layer="TEXT", rotation=0.0, center=False, align_code=None):
+    def add_text(self, x, y, text, height=100.0, layer="TEXT", rotation=0.0, center=False, align_code=None):
         if layer not in self.layers_created and layer != "0":
              self.add_layer(layer)
 
@@ -310,7 +310,8 @@ def _draw_oneway_reinforcement_detail(
     x0: float, y0: float, x1: float, y1: float,
     bw_mm: float,
     slab_index: int = 0,
-    system: SlabSystem = None # system eklendi
+    system: SlabSystem = None,
+    drawn_supports: set = None
 ):
     """
     Tek doÄŸrultulu dÃ¶ÅŸeme iÃ§in detaylÄ± donatÄ± krokisi Ã§izer.
@@ -361,11 +362,11 @@ def _draw_oneway_reinforcement_detail(
         if ch_duz:
             pts = _draw_straight_hit_polyline(x_duz, iy0, x_duz, iy1, bw_mm, bw_mm)
             w.add_polyline(pts, layer="REB_MAIN_DUZ")
-            w.add_text(x_duz - 100, iy0 + Ly/6, f"duz {ch_duz.label()}", height=300, layer="TEXT", rotation=90)
+            w.add_text(x_duz - 200, iy0 + Ly/6, f"duz {ch_duz.label()}", height=150, layer="TEXT", rotation=90)
         if ch_pilye:
             pts = _pilye_polyline(x_pilye, iy0, x_pilye, iy1, d=200.0, kink="both", hook_len=bw_mm, beam_ext=bw_mm, mirror=False)
             w.add_polyline(pts, layer="REB_MAIN_PILYE")
-            w.add_text(x_pilye + 100, iy0 + Ly/6, f"pilye {ch_pilye.label()}", height=300, layer="TEXT", rotation=90)
+            w.add_text(x_pilye + 200, iy0 + Ly/6, f"pilye {ch_pilye.label()}", height=150, layer="TEXT", rotation=90)
             
         # 2. Distribution (Horizontal) - crossing L/R
         if ch_dist:
@@ -381,7 +382,7 @@ def _draw_oneway_reinforcement_detail(
                 pts.append((x1 + hook_ext, y_dist)); pts.append((x1 + hook_ext, y_dist - hook_ext))
             else: pts.append((x1, y_dist)) # Changed from x1+hook_ext to x1
             w.add_polyline(pts, layer="REB_DIST")
-            w.add_text(x0 + Lx/6, y_dist + 30, f"dagitma {ch_dist.label()}", height=300, layer="TEXT", center=True)
+            w.add_text(midx, y_dist + 150, f"dagitma {ch_dist.label()}", height=150, layer="TEXT", center=True)
 
         # 3 & 4. Supports on L/R (Horizontal)
         y_k = midy - 1.5 * bw_mm
@@ -390,27 +391,26 @@ def _draw_oneway_reinforcement_detail(
             L_self = _get_single_side_ext(system, sid, "X")
             nb_id, _ = _get_neighbor_id_on_edge(system, sid, "L")
             L_nb = _get_single_side_ext(system, nb_id, "X") if nb_id else L_self
-            # Let's use _draw_hat_bar logic instead
-            _draw_hat_bar(w, x0 - bw_mm/2, y_k, bw_mm, ch_ic_start, L_ext_left=L_nb, L_ext_right=L_self, axis="X")
+            _draw_hat_bar(w, x0 - bw_mm/2, y_k, bw_mm, ch_ic_start, L_ext_left=L_nb, L_ext_right=L_self, axis="X", drawn_supports=drawn_supports)
         elif ch_kenar_start and not edge_cont.get("kisa_start"): # Edge
             L_self = _get_single_side_ext(system, sid, "X") # Ln/4
             L10 = L_self / 2.5 # (Ln/4) / 2.5 = Ln/10
             pts = [(x0 - hook_ext, y_k + bw_mm), (x0 - hook_ext, y_k), (ix0 + L_self - d_crank, y_k), (ix0 + L_self, y_k + d_crank), (ix0 + L_self + L10, y_k + d_crank)]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x0 + L_self/2, y_k + 30, ch_kenar_start.label(), height=250, layer="TEXT", center=True)
+            w.add_text(x0 + L_self/2, y_k + 100, ch_kenar_start.label(), height=125, layer="TEXT", center=True)
 
         # Right
         if ch_ic_end and edge_cont.get("kisa_end"): # Interior
             L_self = _get_single_side_ext(system, sid, "X")
             nb_id, _ = _get_neighbor_id_on_edge(system, sid, "R")
             L_nb = _get_single_side_ext(system, nb_id, "X") if nb_id else L_self
-            _draw_hat_bar(w, x1 + bw_mm/2, y_k, bw_mm, ch_ic_end, L_ext_left=L_self, L_ext_right=L_nb, axis="X")
+            _draw_hat_bar(w, x1 + bw_mm/2, y_k, bw_mm, ch_ic_end, L_ext_left=L_self, L_ext_right=L_nb, axis="X", drawn_supports=drawn_supports)
         elif ch_kenar_end and not edge_cont.get("kisa_end"): # Edge
             L_self = _get_single_side_ext(system, sid, "X") # Ln/4
             L10 = L_self / 2.5 # (Ln/4) / 2.5 = Ln/10
             pts = [(x1 + hook_ext, y_k + bw_mm), (x1 + hook_ext, y_k), (ix1 - L_self + d_crank, y_k), (ix1 - L_self, y_k + d_crank), (ix1 - L_self - L10, y_k + d_crank)]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x1 - L_self/2, y_k + 30, ch_kenar_end.label(), height=250, layer="TEXT", center=True)
+            w.add_text(x1 - L_self/2, y_k + 100, ch_kenar_end.label(), height=125, layer="TEXT", center=True)
 
         # 5. Mesnet Ek on T/B (Vertical) - load direction
         max_x_main = 0.0
@@ -424,13 +424,14 @@ def _draw_oneway_reinforcement_detail(
             L_self = _get_single_side_ext(system, sid, "Y")
             nb_id, _ = _get_neighbor_id_on_edge(system, sid, "T")
             L_nb = _get_single_side_ext(system, nb_id, "Y") if nb_id else L_self
-            _draw_hat_bar(w, midx + offset_val, y0 - bw_mm/2, bw_mm, ch_ek_start, L_ext_left=L_nb, L_ext_right=L_self, axis="Y")
+            _draw_hat_bar(w, midx + offset_val, y0 - bw_mm/2, bw_mm, ch_ek_start, L_ext_left=L_nb, L_ext_right=L_self, axis="Y", drawn_supports=drawn_supports)
+        
         # Bottom
         if ch_ek_end and edge_cont.get("uzun_end"):
             L_self = _get_single_side_ext(system, sid, "Y")
             nb_id, _ = _get_neighbor_id_on_edge(system, sid, "B")
             L_nb = _get_single_side_ext(system, nb_id, "Y") if nb_id else L_self
-            _draw_hat_bar(w, midx + offset_val, y1 + bw_mm/2, bw_mm, ch_ek_end, L_ext_left=L_self, L_ext_right=L_nb, axis="Y")
+            _draw_hat_bar(w, midx + offset_val, y1 + bw_mm/2, bw_mm, ch_ek_end, L_ext_left=L_self, L_ext_right=L_nb, axis="Y", drawn_supports=drawn_supports)
 
     else: # auto_dir == "Y"
         # Span = X. Main rebar is Horizontal.
@@ -443,11 +444,11 @@ def _draw_oneway_reinforcement_detail(
         if ch_duz:
             pts = _draw_straight_hit_polyline(ix0, y_duz, ix1, y_duz, bw_mm, bw_mm)
             w.add_polyline(pts, layer="REB_MAIN_DUZ")
-            w.add_text(x0 + Lx/6, y_duz + 30, f"duz {ch_duz.label()}", height=300, layer="TEXT", center=True)
+            w.add_text(midx, y_duz + 100, f"duz {ch_duz.label()}", height=150, layer="TEXT", center=True)
         if ch_pilye:
             pts = _pilye_polyline(ix0, y_pilye, ix1, y_pilye, d=200.0, kink="both", hook_len=bw_mm, beam_ext=bw_mm, mirror=True)
             w.add_polyline(pts, layer="REB_MAIN_PILYE")
-            w.add_text(x0 + Lx/6, y_pilye + 30, f"pilye {ch_pilye.label()}", height=300, layer="TEXT", center=True)
+            w.add_text(midx, y_pilye + 100, f"pilye {ch_pilye.label()}", height=150, layer="TEXT", center=True)
 
         # 2. Distribution (Vertical) - crossing T/B
         if ch_dist:
@@ -463,7 +464,7 @@ def _draw_oneway_reinforcement_detail(
                 pts.extend([(x_dist, y1), (x_dist, y1 + hook_ext), (x_dist - hook_ext, y1 + hook_ext)])
             else: pts.append((x_dist, y1))
             w.add_polyline(pts, layer="REB_DIST")
-            w.add_text(x_dist + 100, y0 + Ly/6, f"dagitma {ch_dist.label()}", height=300, layer="TEXT", rotation=90)
+            w.add_text(x_dist + 200, y0 + Ly/6, f"dagitma {ch_dist.label()}", height=150, layer="TEXT", rotation=90)
 
         # 3 & 4. Supports on T/B (Vertical)
         x_k = midx - 1.5 * bw_mm
@@ -472,25 +473,25 @@ def _draw_oneway_reinforcement_detail(
             L_self = _get_single_side_ext(system, sid, "Y")
             nb_id, _ = _get_neighbor_id_on_edge(system, sid, "T")
             L_nb = _get_single_side_ext(system, nb_id, "Y") if nb_id else L_self
-            _draw_hat_bar(w, x_k, y0 - bw_mm/2, bw_mm, ch_ic_start, L_ext_left=L_nb, L_ext_right=L_self, axis="Y")
+            _draw_hat_bar(w, x_k, y0 - bw_mm/2, bw_mm, ch_ic_start, L_ext_left=L_nb, L_ext_right=L_self, axis="Y", drawn_supports=drawn_supports)
         elif ch_kenar_start and not edge_cont.get("kisa_start"): # Edge
             L_self = _get_single_side_ext(system, sid, "Y") # Ln/4
             L10 = L_self / 2.5 # (Ln/4) / 2.5 = Ln/10
             pts = [(x_k + bw_mm, y0 - hook_ext), (x_k, y0 - hook_ext), (x_k, iy0 + L_self - d_crank), (x_k + d_crank, iy0 + L_self), (x_k + d_crank, iy0 + L_self + L10)]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x_k - 100, y0 + L_self/2, ch_kenar_start.label(), height=250, layer="TEXT", rotation=90)
+            w.add_text(x_k - 200, y0 + L_self/2, ch_kenar_start.label(), height=125, layer="TEXT", rotation=90)
         # Bottom
         if ch_ic_end and edge_cont.get("kisa_end"): # Interior
             L_self = _get_single_side_ext(system, sid, "Y")
             nb_id, _ = _get_neighbor_id_on_edge(system, sid, "B")
             L_nb = _get_single_side_ext(system, nb_id, "Y") if nb_id else L_self
-            _draw_hat_bar(w, x_k, y1 + bw_mm/2, bw_mm, ch_ic_end, L_ext_left=L_self, L_ext_right=L_nb, axis="Y")
+            _draw_hat_bar(w, x_k, y1 + bw_mm/2, bw_mm, ch_ic_end, L_ext_left=L_self, L_ext_right=L_nb, axis="Y", drawn_supports=drawn_supports)
         elif ch_kenar_end and not edge_cont.get("kisa_end"): # Edge
             L_self = _get_single_side_ext(system, sid, "Y") # Ln/4
             L10 = L_self / 2.5 # (Ln/4) / 2.5 = Ln/10
             pts = [(x_k + bw_mm, y1 + hook_ext), (x_k, y1 + hook_ext), (x_k, iy1 - L_self + d_crank), (x_k + d_crank, iy1 - L_self), (x_k + d_crank, iy1 - L_self - L10)]
             w.add_polyline(pts, layer="REB_KENAR")
-            w.add_text(x_k - 100, y1 - L_self/2, ch_kenar_end.label(), height=250, layer="TEXT", rotation=90)
+            w.add_text(x_k - 200, y1 - L_self/2, ch_kenar_end.label(), height=125, layer="TEXT", rotation=90)
 
         # 5. Mesnet Ek on L/R (Horizontal) - load direction
         max_y_main = 0.0
@@ -505,14 +506,14 @@ def _draw_oneway_reinforcement_detail(
             L_self = _get_single_side_ext(system, sid, "X")
             nb_id, _ = _get_neighbor_id_on_edge(system, sid, "L")
             L_nb = _get_single_side_ext(system, nb_id, "X") if nb_id else L_self
-            _draw_hat_bar(w, x0 - bw_mm/2, midy + offset_val, bw_mm, ch_ek_start, L_ext_left=L_nb, L_ext_right=L_self, axis="X")
+            _draw_hat_bar(w, x0 - bw_mm/2, midy + offset_val, bw_mm, ch_ek_start, L_ext_left=L_nb, L_ext_right=L_self, axis="X", drawn_supports=drawn_supports)
                 
         # Right
         if ch_ek_end and edge_cont.get("uzun_end"):
             L_self = _get_single_side_ext(system, sid, "X")
             nb_id, _ = _get_neighbor_id_on_edge(system, sid, "R")
             L_nb = _get_single_side_ext(system, nb_id, "X") if nb_id else L_self
-            _draw_hat_bar(w, x1 + bw_mm/2, midy + offset_val, bw_mm, ch_ek_end, L_ext_left=L_self, L_ext_right=L_nb, axis="X")
+            _draw_hat_bar(w, x1 + bw_mm/2, midy + offset_val, bw_mm, ch_ek_end, L_ext_left=L_self, L_ext_right=L_nb, axis="X", drawn_supports=drawn_supports)
 
 
 def export_to_dxf(system: SlabSystem, filename: str, design_cache: dict, bw_val: float,
@@ -521,8 +522,9 @@ def export_to_dxf(system: SlabSystem, filename: str, design_cache: dict, bw_val:
 
     # KiriÅŸ olan kenarlara bw/2 ekle â†’ Lx = Lxnet + bw etkisi
     # ======================================================================
-    # Ã‡izilmiÅŸ kiriÅŸleri takip et (aynÄ± kiriÅŸi iki kez Ã§izmemek iÃ§in)
+    # Ã‡izilmiÅŸ kiriÅŸleri ve mesnet donatÄ±larÄ±nÄ± takip et (mÃ¼kerrerliliÄŸi Ã¶nlemek iÃ§in)
     drawn_beams = set()
+    drawn_supports = set()
 
     # Toplam YÃ¼ksekliÄŸi Hesapla (Y ekseni simetrisi iÃ§in)
     max_y_mm = 0.0
@@ -696,8 +698,8 @@ def export_to_dxf(system: SlabSystem, filename: str, design_cache: dict, bw_val:
                     (x_end, grid_y1 + half), (x_start, grid_y1 + half)
                 ], layer="BEAM", closed=True)
 
-        # DÃ¶ÅŸeme ismi - sol Ã¼st kÃ¶ÅŸeden 50mm saÄŸ, 100mm aÅŸaÄŸÄ±
-        w.add_text(x0 + 50, y1 - 100, sid, height=300, layer="TEXT")
+        # DÃ¶ÅŸeme ismi - saÄŸ alt kÃ¶ÅŸeye daha yakÄ±n (Ã§akÄ±ÅŸma iÃ§in yer deÄŸiÅŸtirildi)
+        w.add_text(x0 + 150, y1 - 150, sid, height=150, layer="TEXT")
 
         dcache = design_cache.get(sid)
         if not dcache:
@@ -706,13 +708,13 @@ def export_to_dxf(system: SlabSystem, filename: str, design_cache: dict, bw_val:
         kind = dcache.get("kind")
 
         if kind == "ONEWAY":
-            _draw_oneway_reinforcement_detail(w, sid, s, dcache, x0, y0, x1, y1, bw_mm, slab_index=idx, system=system)
+            _draw_oneway_reinforcement_detail(w, sid, s, dcache, x0, y0, x1, y1, bw_mm, slab_index=idx, system=system, drawn_supports=drawn_supports)
 
         elif kind == "TWOWAY":
-            _draw_twoway_reinforcement_detail(w, sid, s, dcache, x0, y0, x1, y1, bw_mm, slab_index=idx, system=system)
+            _draw_twoway_reinforcement_detail(w, sid, s, dcache, x0, y0, x1, y1, bw_mm, slab_index=idx, system=system, drawn_supports=drawn_supports)
 
         elif kind == "BALCONY":
-            _draw_balcony_reinforcement_detail(w, sid, s, dcache, x0, y0, x1, y1, bw_mm, system=system, real_slabs=real_slabs)
+            _draw_balcony_reinforcement_detail(w, sid, s, dcache, x0, y0, x1, y1, bw_mm, system=system, real_slabs=real_slabs, drawn_supports=drawn_supports)
 
     w.save(filename)
 
@@ -725,7 +727,8 @@ def _draw_twoway_reinforcement_detail(
     x0: float, y0: float, x1: float, y1: float,
     bw_mm: float,
     slab_index: int = 0,
-    system: "SlabSystem" = None
+    system: "SlabSystem" = None,
+    drawn_supports: set = None
 ):
     """
     Ã‡ift doÄŸrultulu dÃ¶ÅŸeme iÃ§in detaylÄ± donatÄ± krokisi Ã§izer.
@@ -797,7 +800,7 @@ def _draw_twoway_reinforcement_detail(
 
         w.add_polyline(pts, layer="REB_MAIN_DUZ")
         # Label: Line AltÄ± (-30), BaÅŸlangÄ±Ã§tan (x0) Lx/6 saÄŸda
-        w.add_text(x0 + (Lx / 6.0), y_duz_x - 30, f"X duz {ch_x_duz.label()}", height=300, layer="TEXT", center=True)
+        w.add_text(midx, y_duz_x - 100, f"X duz {ch_x_duz.label()}", height=150, layer="TEXT", center=True)
 
     # X YÃ¶nÃ¼ Pilye DonatÄ±
     if ch_x_pilye:
@@ -805,7 +808,7 @@ def _draw_twoway_reinforcement_detail(
         pts = _pilye_polyline(x0, y_pilye_x, x1, y_pilye_x, d=200.0, kink="both", hook_len=hook_len, beam_ext=beam_ext_pilye, mirror=True)
         w.add_polyline(pts, layer="REB_MAIN_PILYE")
         # Label: Line ÃœstÃ¼ (+30), BaÅŸlangÄ±Ã§tan (x0) Lx/6 saÄŸda
-        w.add_text(x0 + (Lx / 6.0), y_pilye_x + 30, f"X pilye {ch_x_pilye.label()}", height=300, layer="TEXT", center=True)
+        w.add_text(midx, y_pilye_x + 100, f"X pilye {ch_x_pilye.label()}", height=150, layer="TEXT", center=True)
 
     # X YÃ¶nÃ¼ Mesnet Ek DonatÄ±larÄ± (L ve R kenarlarÄ±)
     support_extra = choices.get("support_extra", {})
@@ -832,7 +835,7 @@ def _draw_twoway_reinforcement_detail(
         if ch_x_pilye: max_y_main = max(max_y_main, abs(y_pilye_x - midy))
         cy = midy + max_y_main + 2.0 * bw_mm
         
-        _draw_hat_bar(w, cx, cy, bw_mm, choice_ek, L_ext_left=le, L_ext_right=re, axis="X")
+        _draw_hat_bar(w, cx, cy, bw_mm, choice_ek, L_ext_left=le, L_ext_right=re, axis="X", drawn_supports=drawn_supports)
 
     # ... (Y Ana DonatÄ±lar aynen devam eder) ...
 
@@ -875,7 +878,7 @@ def _draw_twoway_reinforcement_detail(
         w.add_polyline(pts, layer="REB_MAIN_DUZ")
         # Label: Line Solu (-100), BaÅŸlangÄ±Ã§tan (y0) Ly/6 aÅŸaÄŸÄ±da
         lbl_y = y0 + (Ly / 6.0)
-        w.add_text(x_duz_y - 100, lbl_y, f"Y duz {ch_y_duz.label()}", height=300, layer="TEXT", rotation=90, center=True)
+        w.add_text(x_duz_y - 200, lbl_y, f"Y duz {ch_y_duz.label()}", height=150, layer="TEXT", rotation=90, center=True)
 
     # Y YÃ¶nÃ¼ Pilye DonatÄ±
     if ch_y_pilye:
@@ -883,7 +886,7 @@ def _draw_twoway_reinforcement_detail(
         w.add_polyline(pts, layer="REB_MAIN_PILYE")
         # Label: Line SaÄŸÄ± (+100), Ly/6
         lbl_y = y0 + (Ly / 6.0)
-        w.add_text(x_pilye_y + 100, lbl_y, f"Y pilye {ch_y_pilye.label()}", height=300, layer="TEXT", rotation=90, center=True)
+        w.add_text(x_pilye_y + 200, lbl_y, f"Y pilye {ch_y_pilye.label()}", height=150, layer="TEXT", rotation=90, center=True)
 
     # Y YÃ¶nÃ¼ Mesnet Ek DonatÄ±larÄ± (T ve B kenarlarÄ±)
     for edge in ["T", "B"]:
@@ -907,7 +910,7 @@ def _draw_twoway_reinforcement_detail(
         if ch_y_pilye: max_x_main = max(max_x_main, abs(x_pilye_y - midx))
         cx = midx - (max_x_main + 2.0 * bw_mm)
         
-        _draw_hat_bar(w, cx, cy, bw_mm, choice_ek, L_ext_left=le, L_ext_right=re, axis="Y")
+        _draw_hat_bar(w, cx, cy, bw_mm, choice_ek, L_ext_left=le, L_ext_right=re, axis="Y", drawn_supports=drawn_supports)
 
     # DÃ¶ÅŸeme ID'si kaldÄ±rÄ±ldÄ± (kullanÄ±cÄ± isteÄŸi)
 
@@ -954,7 +957,7 @@ def _draw_support_extra_x(w, x_ref, y_ref, bw_mm, choice, Ln_long, is_left=True)
     # Label - 30mm above the flat part (y_ref or y_ref+d_crank depending on segment)
     # The label is usually for the part inside the slab.
     lbl_x = x_ref + (L4/2.0) if is_left else x_ref - (L4/2.0)
-    w.add_text(lbl_x, y_ref + 30, f"Ek {choice.label()}", height=250, layer="TEXT", center=True)
+    w.add_text(lbl_x, y_ref + 100, f"Ek {choice.label()}", height=125, layer="TEXT", center=True)
 
 
 def _draw_support_extra_y(w, x_ref, y_ref, bw_mm, choice, Ln_long, is_top=True):
@@ -998,7 +1001,7 @@ def _draw_support_extra_y(w, x_ref, y_ref, bw_mm, choice, Ln_long, is_top=True):
     w.add_polyline(pts, layer="REB_EK_MESNET")
     lbl_y = y_ref + (L4/2.0) if is_top else y_ref - (L4/2.0)
     # Vertical Ek: text to the left now (-100) to avoid shifted line (+d_crank)
-    w.add_text(x_ref - 100, lbl_y, f"Ek {choice.label()}", height=250, layer="TEXT", rotation=90, center=True)
+    w.add_text(x_ref - 200, lbl_y, f"Ek {choice.label()}", height=125, layer="TEXT", rotation=90, center=True)
 
 
 
@@ -1010,7 +1013,8 @@ def _draw_balcony_reinforcement_detail(
     x0: float, y0: float, x1: float, y1: float,
     bw_mm: float,
     system: "SlabSystem" = None,
-    real_slabs: dict = None
+    real_slabs: dict = None,
+    drawn_supports: set = None
 ):
     """
     Balkon donatÄ±sÄ±:
@@ -1071,7 +1075,7 @@ def _draw_balcony_reinforcement_detail(
                 (x0 - L_anchor - d_crank - Ln10, y_pos + d_crank),  # KÄ±rÄ±ktan sonra Ln/10 dÃ¼z
             ]
             w.add_polyline(pts, layer=layer)
-            w.add_text(x0 + (Lx / 6.0), y_pos + 30, f"Ana {ch_main.label()}", height=300, layer="TEXT")
+            w.add_text(x0 + (Lx / 6.0), y_pos + 100, f"Ana {ch_main.label()}", height=150, layer="TEXT")
             
             # DaÄŸÄ±tma (Dikey) - uÃ§larda kanca
             if ch_dist:
@@ -1083,7 +1087,7 @@ def _draw_balcony_reinforcement_detail(
                     (x_dist + free_hook, iy1),   # Alt kenarda kanca (saÄŸa)
                 ]
                 w.add_polyline(pts_dist, layer="REB_BALCONY_DIST")
-                w.add_text(x_dist + 30, iy0 + (Ly / 6.0), f"dagitma {ch_dist.label()}", height=250, layer="TEXT", rotation=90)
+                w.add_text(x_dist + 150, iy0 + (Ly / 6.0), f"dagitma {ch_dist.label()}", height=125, layer="TEXT", rotation=90)
 
         elif fixed == "R":
             # SaÄŸ taraf sabit, Sol taraf serbest
@@ -1098,7 +1102,7 @@ def _draw_balcony_reinforcement_detail(
                 (x1 + L_anchor + d_crank + Ln10, y_pos + d_crank),  # KÄ±rÄ±ktan sonra Ln/10 dÃ¼z
             ]
             w.add_polyline(pts, layer=layer)
-            w.add_text(x1 - (Lx / 6.0) - 100, y_pos + 30, f"Ana {ch_main.label()}", height=300, layer="TEXT")
+            w.add_text(x1 - (Lx / 6.0) - 100, y_pos + 100, f"Ana {ch_main.label()}", height=150, layer="TEXT")
             
             # DaÄŸÄ±tma (Dikey) - uÃ§larda kanca
             if ch_dist:
@@ -1110,7 +1114,7 @@ def _draw_balcony_reinforcement_detail(
                     (x_dist + free_hook, iy1),
                 ]
                 w.add_polyline(pts_dist, layer="REB_BALCONY_DIST")
-                w.add_text(x_dist + 30, iy0 + (Ly / 6.0), f"dagitma {ch_dist.label()}", height=250, layer="TEXT", rotation=90)
+                w.add_text(x_dist + 150, iy0 + (Ly / 6.0), f"dagitma {ch_dist.label()}", height=125, layer="TEXT", rotation=90)
 
         elif fixed == "T":
             # Ãœst taraf sabit, Alt taraf serbest
@@ -1125,7 +1129,7 @@ def _draw_balcony_reinforcement_detail(
                 (x_pos + d_crank, y0 - L_anchor - d_crank - Ln10),  # KÄ±rÄ±ktan sonra Ln/10 dÃ¼z
             ]
             w.add_polyline(pts, layer=layer)
-            w.add_text(x_pos + 30, y0 + (Ly / 6.0), f"Ana {ch_main.label()}", height=300, layer="TEXT", rotation=90)
+            w.add_text(x_pos + 100, y0 + (Ly / 6.0), f"Ana {ch_main.label()}", height=150, layer="TEXT", rotation=90)
 
             # DaÄŸÄ±tma (Yatay) - uÃ§larda kanca
             if ch_dist:
@@ -1137,7 +1141,7 @@ def _draw_balcony_reinforcement_detail(
                     (ix1, y_dist + free_hook),   # SaÄŸ kenarda kanca (aÅŸaÄŸÄ± - ters)
                 ]
                 w.add_polyline(pts_dist, layer="REB_BALCONY_DIST")
-                w.add_text(ix0 + (Lx / 6.0), y_dist - 30, f"dagitma {ch_dist.label()}", height=250, layer="TEXT")
+                w.add_text(ix0 + (Lx / 6.0), y_dist - 150, f"dagitma {ch_dist.label()}", height=125, layer="TEXT")
 
         elif fixed == "B":
             # Alt taraf sabit, Ãœst taraf serbest
@@ -1152,7 +1156,7 @@ def _draw_balcony_reinforcement_detail(
                 (x_pos + d_crank, y1 + L_anchor + d_crank + Ln10),  # KÄ±rÄ±ktan sonra Ln/10 dÃ¼z
             ]
             w.add_polyline(pts, layer=layer)
-            w.add_text(x_pos + 30, y1 - (Ly/6.0) - 200, f"Ana {ch_main.label()}", height=300, layer="TEXT", rotation=90)
+            w.add_text(x_pos + 100, y1 - (Ly/6.0) - 200, f"Ana {ch_main.label()}", height=150, layer="TEXT", rotation=90)
 
             # DaÄŸÄ±tma (Yatay) - uÃ§larda kanca
             if ch_dist:
@@ -1164,7 +1168,7 @@ def _draw_balcony_reinforcement_detail(
                     (ix1, y_dist + free_hook),
                 ]
                 w.add_polyline(pts_dist, layer="REB_BALCONY_DIST")
-                w.add_text(ix0 + (Lx / 6.0), y_dist - 30, f"dagitma {ch_dist.label()}", height=250, layer="TEXT")
+                w.add_text(ix0 + (Lx / 6.0), y_dist - 150, f"dagitma {ch_dist.label()}", height=125, layer="TEXT")
 
 
 def _get_neighbor_id_on_edge(system, sid, edge):
@@ -1186,7 +1190,7 @@ def _get_neighbor_id_on_edge(system, sid, edge):
     return None, None
 
 
-def _draw_hat_bar(w, cx, cy, bw_mm, choice, L_ext_left, L_ext_right, axis="X"):
+def _draw_hat_bar(w, cx, cy, bw_mm, choice, L_ext_left, L_ext_right, axis="X", drawn_supports: set = None):
     """
     Hat (Pilye) Åeklinde Mesnet Ek DonatÄ±sÄ± Ã‡izer.
     
@@ -1207,6 +1211,12 @@ def _draw_hat_bar(w, cx, cy, bw_mm, choice, L_ext_left, L_ext_right, axis="X"):
     - Kuyruklar: Lb/4 kadar uzatÄ±lÄ±r (sabit kabul veya parametrik).
     - d_crank: KÄ±rÄ±lma yÃ¼ksekliÄŸi (200mm)
     """
+    if drawn_supports is not None:
+        # Koordinat yuvarlama (100mm) ile yakÄ±n donatÄ±larÄ± birleÅŸtir
+        key = (int(cx/100)*100, int(cy/100)*100, axis)
+        if key in drawn_supports:
+             return
+        drawn_supports.add(key)
     
     d = 200.0  # Crank height/depth
     # Ln/4 * 0.4 = Ln/10. User requested Ln/10 tail length.
@@ -1253,7 +1263,7 @@ def _draw_hat_bar(w, cx, cy, bw_mm, choice, L_ext_left, L_ext_right, axis="X"):
         w.add_polyline(pts, layer="REB_EK_MESNET")
         
         # Text
-        w.add_text(cx, cy + 30, f"Ek {choice.label()}", height=300, layer="TEXT", center=True)
+        w.add_text(cx, cy + 100, f"Ek {choice.label()}", height=150, layer="TEXT", center=True)
         # Boyut Ã§izgisi eklenebilir
         
     else: # Axis Y (Dikey)
@@ -1292,5 +1302,5 @@ def _draw_hat_bar(w, cx, cy, bw_mm, choice, L_ext_left, L_ext_right, axis="X"):
         pts.append((x_shifted, y_tail_end_B))    # Alt Kuyruk Ucu
         
         w.add_polyline(pts, layer="REB_EK_MESNET")
-        w.add_text(x_main - 100, cy, f"Ek {choice.label()}", height=300, layer="TEXT", rotation=90, center=True)
+        w.add_text(x_main - 200, cy, f"Ek {choice.label()}", height=150, layer="TEXT", rotation=90, center=True)
 

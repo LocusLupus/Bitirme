@@ -96,6 +96,8 @@ class App(tk.Tk):
 
         # AI Analiz dosyası takibi
         self.debug_img_path = None
+        self.last_ai_image_path = None
+        self.ai_conf = tk.DoubleVar(value=0.35)
 
         self._build_ui()
         # Uygulama açıldığında canvas'ın hazır olması için biraz bekleyip çiz
@@ -120,6 +122,7 @@ class App(tk.Tk):
         ttk.Entry(prm, textvariable=self.b_width, width=6).grid(row=r, column=7, padx=2)
         ttk.Label(prm, text="bw:").grid(row=r, column=8, padx=2)
         ttk.Entry(prm, textvariable=self.bw, width=6).grid(row=r, column=9, padx=2)
+        ttk.Button(prm, text="Döşeme Ekle", command=self.add_first_slab).grid(row=r, column=10, padx=5)
 
         # Materials
         reb = ttk.LabelFrame(top, text="Malzeme / h")
@@ -155,6 +158,15 @@ class App(tk.Tk):
         ttk.Button(act, text="2. Hesapla", command=self.compute_and_report).grid(row=0, column=2, padx=2, pady=1)
         ttk.Button(act, text="3. DXF Al", command=self.export_dxf_and_open).grid(row=1, column=0, padx=2, pady=1)
         ttk.Button(act, text="Temizle", command=self.reset_all).grid(row=1, column=1, padx=2, pady=1)
+
+        # AI Ayarları
+        ai_set = ttk.LabelFrame(top, text="AI Ayarları")
+        ai_set.pack(side="right", padx=10)
+        ttk.Label(ai_set, text="Conf:").grid(row=0, column=0, padx=2)
+        tk.Scale(ai_set, from_=0.05, to_=0.95, resolution=0.05, 
+                 variable=self.ai_conf, orient="horizontal", length=100, 
+                 showvalue=True).grid(row=0, column=1, padx=2)
+        ttk.Button(ai_set, text="Yeniden Çöz", command=self.reprocess_last_image_ai).grid(row=0, column=2, padx=2)
 
         # AI Görselini Göster Butonu (Başlangıçta gizli veya pasif)
         self.btn_view_ai = ttk.Button(top, text="Analiz Görselini Gör", command=self.view_ai_image, state="disabled")
@@ -1069,12 +1081,24 @@ class App(tk.Tk):
         if not fpath:
             return
 
+        self.last_ai_image_path = fpath
+        self._run_ai_pipeline(fpath)
+
+    def reprocess_last_image_ai(self):
+        """Mevcut görseli yeni güven eşiği (conf) ile tekrar analiz eder."""
+        if not self.last_ai_image_path:
+            messagebox.showinfo("Bilgi", "Önce bir görsel yüklemelisiniz.")
+            return
+        self._run_ai_pipeline(self.last_ai_image_path)
+
+    def _run_ai_pipeline(self, fpath: str):
+        """AI pipeline'ını çalıştırır ve sonuçları yükler."""
         # Yükleme göstergesi (geçici çözüm - status bar eklenebilir)
         self.output.delete("1.0", "end")
-        self.output.insert("end", "YOLO ve OCR Pipeline çalışıyor, lütfen bekleyin...\n")
+        self.output.insert("end", f"YOLO ve OCR Pipeline çalışıyor (Conf={self.ai_conf.get():.2f}), lütfen bekleyin...\n")
         self.update()
 
-        slab_data_list, beam_edges, debug_img = process_image_to_slabs(fpath)
+        slab_data_list, beam_edges, debug_img = process_image_to_slabs(fpath, conf=self.ai_conf.get())
 
         if slab_data_list is None:
             messagebox.showerror("Hata", "Görsel işlenirken bir sorun oluştu.")
