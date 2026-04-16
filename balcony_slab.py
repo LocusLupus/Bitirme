@@ -15,13 +15,8 @@ from struct_design import (
 def balcony_fixed_edge_guess(system, sid: str) -> Tuple[str, List[str]]:
     """
     Balkon döşemesi için ankastre (sabit) kenarı tahmin eder.
-    Eğer döşeme objesinde tanımlı bir fixed_edge varsa o kullanılır,
-    yoksa en yüksek komşuluk oranına sahip kenar seçilir.
+    En yüksek komşuluk oranına sahip kenar seçilir.
     """
-    s = system.slabs[sid]
-    if hasattr(s, "fixed_edge") and s.fixed_edge:
-        return s.fixed_edge, [f"Using explicit fixed_edge: {s.fixed_edge}"]
-        
     steps = []
     ratios = {}
     for e in ["L", "R", "T", "B"]:

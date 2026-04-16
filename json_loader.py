@@ -240,23 +240,9 @@ def _parse_cell_types_format(json_data: Dict[str, Any]):
             continue
             
         xmin, ymin, xmax, ymax = bbox
-        
-        # Fixed edge mapping derived from edge_type
-        fixed_edge = {"top": "B", "bottom": "T", "left": "R", "right": "L"}.get(edge_type, "B")
-        
         if edge_type in ("top", "bottom"):
-            # Lateral snapping (X axis)
-            xi_start = closest_line_index(xmin, x_lines_px)
-            xi_end = closest_line_index(xmax, x_lines_px)
-            
-            # Snap to grid if pixels are close enough
-            if 0 <= xi_start < len(x_coords) and 0 <= xi_end < len(x_coords) and xi_end > xi_start:
-                x_m = x_coords[xi_start]
-                w_m = x_coords[xi_end] - x_coords[xi_start]
-            else:
-                xi = closest_line_index(xmin, x_lines_px)
-                x_m = x_coords[xi] if 0 <= xi < len(x_coords) else 0.0
-            
+            xi = closest_line_index(xmin, x_lines_px)
+            x_m = x_coords[xi] if 0 <= xi < len(x_coords) else 0.0
             if edge_type == "top":
                 yi = closest_line_index(ymax, y_lines_px)
                 y_m = (y_coords[yi] - h_m) if 0 <= yi < len(y_coords) else 0.0
@@ -264,17 +250,8 @@ def _parse_cell_types_format(json_data: Dict[str, Any]):
                 yi = closest_line_index(ymin, y_lines_px)
                 y_m = y_coords[yi] if 0 <= yi < len(y_coords) else 0.0
         else:
-            # Lateral snapping (Y axis)
-            yi_start = closest_line_index(ymin, y_lines_px)
-            yi_end = closest_line_index(ymax, y_lines_px)
-            
-            if 0 <= yi_start < len(y_coords) and 0 <= yi_end < len(y_coords) and yi_end > yi_start:
-                y_m = y_coords[yi_start]
-                h_m = y_coords[yi_end] - y_coords[yi_start]
-            else:
-                yi = closest_line_index(ymin, y_lines_px)
-                y_m = y_coords[yi] if 0 <= yi < len(y_coords) else 0.0
-
+            yi = closest_line_index(ymin, y_lines_px)
+            y_m = y_coords[yi] if 0 <= yi < len(y_coords) else 0.0
             if edge_type == "left":
                 xi = closest_line_index(xmax, x_lines_px)
                 x_m = (x_coords[xi] - w_m) if 0 <= xi < len(x_coords) else 0.0
@@ -285,8 +262,7 @@ def _parse_cell_types_format(json_data: Dict[str, Any]):
         slab_list.append({
             "sid": b_id, "x": round(x_m, 6), "y": round(y_m, 6),
             "w": round(w_m, 6), "h": round(h_m, 6), "kind": "BALCONY",
-            "pd": b_data.get("pd", 5.0), "b": b_data.get("b", 1.0),
-            "fixed_edge": fixed_edge
+            "pd": b_data.get("pd", 5.0), "b": b_data.get("b", 1.0)
         })
 
     return slab_list, beam_edges_set
